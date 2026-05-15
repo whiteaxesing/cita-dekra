@@ -1,50 +1,71 @@
 import threading
-import time
 import platform
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from api import fetch_available_days
+import customer
+from api import fetch_available_days, fetch_time_slots, confirm_timeslot, create_booking
 
 TZ_CR = ZoneInfo("America/Costa_Rica")
 
+CUSTOMER = {
+    "first_name":   customer.FIRST_NAME,
+    "last_name":    customer.LAST_NAME,
+    "email":        customer.EMAIL,
+    "phone":        customer.PHONE,
+    "country_code": customer.COUNTRY_CODE,
+    "vehicle_rego": customer.VEHICLE_REGO,
+}
 
-def _play_sound_mac(sound: str, times: int):
+
+def _play_glass(times: int):
     for _ in range(times):
-        subprocess.Popen(["afplay", f"/System/Library/Sounds/{sound}.aiff"]).wait()
+        subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"]).wait()
 
 
-def _speak_mac(message: str, voice: str = "Paulina"):
-    subprocess.Popen(["say", "-v", voice, message]).wait()
+def _speak(msg: str):
+    subprocess.Popen(["say", "-v", "Paulina", msg]).wait()
 
 
-def _notify_windows(title: str, message: str):
+def _notify_windows(title: str, msg: str):
     try:
         from plyer import notification
-        notification.notify(title=title, message=message, timeout=10)
+        notification.notify(title=title, message=msg, timeout=10)
     except Exception:
         pass
 
 
-def _notify_linux(title: str, message: str):
+def _notify_linux(title: str, msg: str):
     try:
-        subprocess.Popen(["notify-send", title, message])
+        subprocess.Popen(["notify-send", title, msg])
     except Exception:
         pass
 
 
-def trigger_alert(location_name: str, dates: list[str], sound_enabled: bool, sound_times: int):
+def trigger_alert(location_name: str, sound_times: int):
     msg = f"Hay disponibilidad en {location_name}. ¡Agendá ya!"
     system = platform.system()
-
-    if system == "Darwin" and sound_enabled:
-        _play_sound_mac("Glass", sound_times)
-        _speak_mac(msg)
+    if system == "Darwin":
+        _play_glass(sound_times)
+        _speak(msg)
     elif system == "Windows":
         _notify_windows("DEKRA — Cita disponible", msg)
     elif system == "Linux":
         _notify_linux("DEKRA — Cita disponible", msg)
+
+
+def trigger_booked_alert(location_name: str, slot_time: str, reservation: str, sound_times: int):
+    msg = f"Cita agendada en {location_name}. Número {reservation}. Revisá tu correo."
+    system = platform.system()
+    if system == "Darwin":
+        _play_glass(sound_times)
+        _speak(msg)
+    elif system == "Windows":
+        _notify_windows("DEKRA — ¡Cita confirmada!", msg)
+    elif system == "Linux":
+        _notify_linux("DEKRA — ¡Cita confirmada!", msg)
 
 
 def format_date(iso: str) -> str:
@@ -52,7 +73,34 @@ def format_date(iso: str) -> str:
     dias  = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
     meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
              "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-    return f"{dias[dt.weekday()]} {dt.day} {meses[dt.month - 1]} {dt.year}"
+    return f"{dias[dt.weekday()]} {dt.day} {meses[dt.month - 1]} {dt.year} {dt.strftime('%H:%M')}"
+
+
+def auto_book(location_id: str, location_name: str, available_days: list[str], sound_times: int) -> dict | None:
+    """Toma el primer día disponible, agarra el primer slot y reserva. Devuelve resultado o None."""
+    for day in available_days:
+        slots = fetch_time_slots(location_id, day)
+        if not slots:
+            continue
+
+        slot = slots[0]  # primer slot disponible
+        confirmed = confirm_timeslot(location_id, slot)
+        if not confirmed:
+            continue
+
+        result = create_booking(location_id, slot, CUSTOMER)
+        if result and result.get("isSuccess"):
+            items = result.get("bookingResultItems", [])
+            reservation = items[0].get("reservationNumber", "?") if items else "?"
+            trigger_booked_alert(location_name, slot["time"], reservation, sound_times)
+            return {
+                "reservationNumber": reservation,
+                "bookingId":         items[0].get("bookingId") if items else None,
+                "slot":              slot,
+                "day":               day,
+            }
+
+    return None
 
 
 class Monitor:
@@ -60,14 +108,13 @@ class Monitor:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        # Estado compartido (leído por la UI)
-        self.running        = False
-        self.last_check     = None
+        self.running         = False
+        self.last_check      = None
         self.available_days: list[str] = []
         self.new_days:       list[str] = []
         self._previous_days: set[str]  = set()
+        self.booking_result: dict | None = None
 
-        # Configuración (seteada desde la UI)
         self.location_id    = ""
         self.location_name  = ""
         self.start_date     = datetime.now(timezone.utc)
@@ -75,23 +122,27 @@ class Monitor:
         self.interval_min   = 5
         self.sound_enabled  = True
         self.sound_times    = 5
+        self.auto_book_enabled = False
 
     def configure(self, location_id: str, location_name: str,
                   start_date: datetime, end_date: datetime,
-                  interval_min: int, sound_enabled: bool, sound_times: int):
-        self.location_id   = location_id
-        self.location_name = location_name
-        self.start_date    = start_date
-        self.end_date      = end_date
-        self.interval_min  = interval_min
-        self.sound_enabled = sound_enabled
-        self.sound_times   = sound_times
+                  interval_min: int, sound_enabled: bool, sound_times: int,
+                  auto_book_enabled: bool):
+        self.location_id       = location_id
+        self.location_name     = location_name
+        self.start_date        = start_date
+        self.end_date          = end_date
+        self.interval_min      = interval_min
+        self.sound_enabled     = sound_enabled
+        self.sound_times       = sound_times
+        self.auto_book_enabled = auto_book_enabled
 
     def start(self):
         if self.running:
             return
         self._stop_event.clear()
-        self._previous_days = set()
+        self._previous_days  = set()
+        self.booking_result  = None
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         self.running = True
@@ -103,20 +154,28 @@ class Monitor:
     def _loop(self):
         while not self._stop_event.is_set():
             self._check()
+            # Si reservó exitosamente, detiene el monitor solo
+            if self.booking_result:
+                self.running = False
+                return
             self._stop_event.wait(timeout=self.interval_min * 60)
 
     def _check(self):
         days = fetch_available_days(self.location_id, self.start_date, self.end_date)
         curr = set(days)
+
         self.new_days       = sorted(curr - self._previous_days)
         self._previous_days = curr
         self.available_days = sorted(days)
         self.last_check     = datetime.now(TZ_CR)
 
-        if self.new_days:
-            trigger_alert(self.location_name, self.new_days,
-                          self.sound_enabled, self.sound_times)
+        if days and self.sound_enabled and not self.auto_book_enabled:
+            trigger_alert(self.location_name, self.sound_times)
+
+        if days and self.auto_book_enabled and not self.booking_result:
+            result = auto_book(self.location_id, self.location_name, days, self.sound_times)
+            if result:
+                self.booking_result = result
 
 
-# Instancia global compartida entre rerenders de Streamlit
 monitor = Monitor()

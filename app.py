@@ -5,17 +5,14 @@ from zoneinfo import ZoneInfo
 from api import fetch_locations
 from monitor import monitor, format_date
 from config import CHECK_INTERVAL_MINUTES, DAYS_AHEAD_DEFAULT
+import customer
 
 TZ_CR = ZoneInfo("America/Costa_Rica")
 
-st.set_page_config(
-    page_title="Cita DEKRA",
-    page_icon="🚗",
-    layout="centered",
-)
+st.set_page_config(page_title="Cita DEKRA", page_icon="🚗", layout="centered")
 
 st.title("🚗 Cita DEKRA — Monitor de disponibilidad")
-st.caption("Revisa automáticamente si hay citas disponibles y te avisa al instante.")
+st.caption("Revisa automáticamente si hay citas disponibles y las agenda por vos.")
 
 # ─── Cargar agencias ──────────────────────────────────────────────────────────
 
@@ -24,22 +21,18 @@ def get_locations():
     return fetch_locations()
 
 locations = get_locations()
-
 if not locations:
     st.error("No se pudieron cargar las agencias. Verificá tu conexión.")
     st.stop()
 
 location_map = {loc["locationName"].strip(): loc["locationId"] for loc in locations}
 
-# ─── Sidebar — Configuración ──────────────────────────────────────────────────
+# ─── Sidebar ─────────────────────────────────────────────────────────────────
 
 with st.sidebar:
     st.header("⚙️ Configuración")
 
-    selected_name = st.selectbox(
-        "Agencia",
-        options=sorted(location_map.keys()),
-    )
+    selected_name = st.selectbox("Agencia", options=sorted(location_map.keys()))
 
     today = date.today()
     col1, col2 = st.columns(2)
@@ -53,17 +46,23 @@ with st.sidebar:
         )
 
     st.divider()
-
-    interval = st.slider("Revisar cada (minutos)", min_value=1, max_value=30, value=CHECK_INTERVAL_MINUTES)
+    interval = st.slider("Revisar cada (minutos)", 1, 30, CHECK_INTERVAL_MINUTES)
 
     st.divider()
-
     sound_enabled = st.toggle("🔊 Sonido al encontrar cita", value=True)
-    sound_times   = st.slider("Repeticiones del sonido", min_value=1, max_value=10, value=5,
-                               disabled=not sound_enabled)
+    sound_times   = st.slider("Repeticiones del sonido", 1, 10, 5, disabled=not sound_enabled)
 
     st.divider()
+    auto_book_on = st.toggle("🤖 Auto-agendar cuando encuentre cita", value=False)
+    if auto_book_on:
+        st.info(
+            f"Se agendará automáticamente para:\n"
+            f"**{customer.FIRST_NAME} {customer.LAST_NAME}**\n"
+            f"Placa: `{customer.VEHICLE_REGO}`\n"
+            f"Primer slot disponible."
+        )
 
+    st.divider()
     start_btn = st.button("▶ Iniciar monitor", use_container_width=True, type="primary",
                            disabled=monitor.running)
     stop_btn  = st.button("⏹ Detener",         use_container_width=True,
@@ -73,13 +72,14 @@ with st.sidebar:
 
 if start_btn:
     monitor.configure(
-        location_id   = location_map[selected_name],
-        location_name = selected_name,
-        start_date    = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc),
-        end_date      = datetime.combine(end_date,   datetime.min.time(), tzinfo=timezone.utc),
-        interval_min  = interval,
-        sound_enabled = sound_enabled,
-        sound_times   = sound_times,
+        location_id       = location_map[selected_name],
+        location_name     = selected_name,
+        start_date        = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc),
+        end_date          = datetime.combine(end_date,   datetime.min.time(), tzinfo=timezone.utc),
+        interval_min      = interval,
+        sound_enabled     = sound_enabled,
+        sound_times       = sound_times,
+        auto_book_enabled = auto_book_on,
     )
     monitor.start()
     st.rerun()
@@ -88,10 +88,29 @@ if stop_btn:
     monitor.stop()
     st.rerun()
 
+# ─── Resultado de booking ─────────────────────────────────────────────────────
+
+if monitor.booking_result:
+    r = monitor.booking_result
+    slot_label = format_date(r["slot"]["time"])
+    st.success(f"## ✅ ¡Cita agendada!")
+    st.markdown(f"""
+| Campo | Valor |
+|-------|-------|
+| **Número de cita** | `{r['reservationNumber']}` |
+| **Fecha y hora** | {slot_label} |
+| **Agencia** | {monitor.location_name} |
+| **Placa** | `{customer.VEHICLE_REGO}` |
+| **bookingId** | `{r['bookingId']}` |
+""")
+    st.info("Revisá tu correo para la confirmación de DEKRA.")
+    st.stop()
+
 # ─── Estado actual ────────────────────────────────────────────────────────────
 
 if monitor.running:
-    st.success(f"Monitoreando **{monitor.location_name}** — cada {monitor.interval_min} min")
+    mode = "🤖 Auto-agendando" if monitor.auto_book_enabled else "👁 Monitoreando"
+    st.success(f"{mode} **{monitor.location_name}** — cada {monitor.interval_min} min")
 else:
     st.info("Monitor detenido. Configurá y presioná **Iniciar**.")
 
@@ -105,7 +124,7 @@ if monitor.new_days:
     for d in monitor.new_days:
         st.success(f"**{format_date(d)}**  —  `{d}`")
 
-# ─── Disponibilidad completa ──────────────────────────────────────────────────
+# ─── Disponibilidad ───────────────────────────────────────────────────────────
 
 st.subheader("📅 Días disponibles")
 
@@ -115,7 +134,6 @@ elif not monitor.available_days:
     st.warning(f"Sin disponibilidad en **{monitor.location_name}** para el rango seleccionado.")
 else:
     st.write(f"**{len(monitor.available_days)} día(s) disponibles** en {monitor.location_name}:")
-
     for d in monitor.available_days:
         col1, col2 = st.columns([2, 3])
         with col1:
@@ -123,10 +141,9 @@ else:
         with col2:
             st.code(d, language=None)
 
-# ─── Auto-refresh mientras está corriendo ─────────────────────────────────────
+# ─── Refresh ──────────────────────────────────────────────────────────────────
 
 if monitor.running:
     st.markdown("---")
     if st.button("🔄 Actualizar resultados"):
         st.rerun()
-    st.caption(f"La página no se actualiza sola — presioná el botón para ver los últimos resultados.")
