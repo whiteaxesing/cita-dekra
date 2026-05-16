@@ -191,3 +191,36 @@ def release_timeslot(location_id: str, slot: dict) -> bool:
         return r.ok
     except Exception:
         return False
+
+
+def fetch_booking(vehicle_rego: str, email: str, phone: str) -> dict | None:
+    """Busca la reserva activa por placa + correo + teléfono."""
+    try:
+        r = _session.get(
+            f"{BASE_URL}/booking/{vehicle_rego}/param/true",
+            params={"customerEmailAddress": email, "customerPhoneNumber": phone},
+            timeout=10,
+        )
+        if not r.ok or not r.text.strip() or r.text.strip() == "null":
+            return None
+        return r.json()
+    except Exception:
+        return None
+
+
+def check_update_allowed(booking_id: str) -> bool:
+    """Verifica si la reserva puede ser modificada."""
+    try:
+        r = _session.get(f"{BASE_URL}/check-update-leadtime/{booking_id}", timeout=10)
+        return r.ok and r.json().get("valid", False)
+    except Exception:
+        return False
+
+
+def delete_booking(booking_id: str) -> bool:
+    """Cancela la reserva."""
+    try:
+        r = _session.delete(f"{BASE_URL}/{booking_id}/{TENANT_ID}", timeout=10)
+        return r.ok
+    except Exception:
+        return False

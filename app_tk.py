@@ -5,7 +5,10 @@ from threading import Thread
 from pathlib import Path
 import json
 
-from api import fetch_locations, fetch_available_days, fetch_time_slots, confirm_timeslot, create_booking
+from api import (fetch_locations, fetch_available_days, fetch_time_slots,
+                 confirm_timeslot, create_booking, release_timeslot,
+                 fetch_booking, check_update_allowed, delete_booking)
+from config import PRODUCT_ID
 from monitor import monitor, format_date
 
 TZ_CR = ZoneInfo("America/Costa_Rica")
@@ -59,9 +62,11 @@ class App(ctk.CTk):
         self._tabs = ctk.CTkTabview(self)
         self._tabs.pack(fill="both", expand=True, padx=20, pady=(0, 16))
         self._tabs.add("Monitor")
+        self._tabs.add("Modificar cita")
         self._tabs.add("Mis datos")
 
         self._build_monitor_tab(self._tabs.tab("Monitor"))
+        self._build_modificar_tab(self._tabs.tab("Modificar cita"))
         self._build_datos_tab(self._tabs.tab("Mis datos"))
 
     def _build_monitor_tab(self, tab):
@@ -135,6 +140,181 @@ class App(ctk.CTk):
         ctk.CTkLabel(tab, text="📅 Resultados", font=ctk.CTkFont(size=14, weight="bold"), anchor="w").pack(fill="x", **pad)
         self.results_box = ctk.CTkTextbox(tab, height=200, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
         self.results_box.pack(fill="both", expand=True, **pad)
+
+    def _build_modificar_tab(self, tab):
+        pad = {"padx": 16, "pady": 6}
+
+        ctk.CTkLabel(tab, text="Modificar cita existente", font=ctk.CTkFont(size=15, weight="bold"), anchor="w").pack(fill="x", **pad)
+        ctk.CTkLabel(tab, text="Buscá tu cita y agendala en otro horario disponible.", text_color="gray", anchor="w").pack(fill="x", padx=16)
+
+        # Cita actual
+        ctk.CTkLabel(tab, text="Cita actual", font=ctk.CTkFont(weight="bold"), anchor="w").pack(fill="x", padx=16, pady=(16, 2))
+        self.mod_current = ctk.CTkLabel(tab, text="Presioná «Buscar» para cargar tu cita.", text_color="gray", anchor="w", wraplength=600)
+        self.mod_current.pack(fill="x", padx=16)
+
+        ctk.CTkButton(tab, text="🔍 Buscar mi cita", command=self._buscar_cita, fg_color="#444").pack(
+            fill="x", padx=16, pady=8)
+
+        ctk.CTkLabel(tab, text="Nueva agencia", anchor="w").pack(fill="x", **pad)
+        self.mod_loc_var = ctk.StringVar(value=sorted(self._locations.keys())[0] if self._locations else "")
+        ctk.CTkOptionMenu(tab, variable=self.mod_loc_var, values=sorted(self._locations.keys())).pack(fill="x", **pad)
+
+        date_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        date_frame.pack(fill="x", **pad)
+        left = ctk.CTkFrame(date_frame, fg_color="transparent")
+        left.pack(side="left", expand=True, fill="x", padx=(0, 5))
+        ctk.CTkLabel(left, text="Desde").pack(anchor="w")
+        self.mod_start = ctk.CTkEntry(left, placeholder_text="YYYY-MM-DD")
+        self.mod_start.insert(0, date.today().strftime("%Y-%m-%d"))
+        self.mod_start.pack(fill="x")
+        right = ctk.CTkFrame(date_frame, fg_color="transparent")
+        right.pack(side="right", expand=True, fill="x", padx=(5, 0))
+        ctk.CTkLabel(right, text="Hasta").pack(anchor="w")
+        self.mod_end = ctk.CTkEntry(right, placeholder_text="YYYY-MM-DD")
+        self.mod_end.insert(0, (date.today() + timedelta(days=30)).strftime("%Y-%m-%d"))
+        self.mod_end.pack(fill="x")
+
+        self.mod_btn = ctk.CTkButton(tab, text="🔄 Modificar a primer slot disponible",
+                                      command=self._modificar_cita, fg_color="#1a6aa0", state="disabled")
+        self.mod_btn.pack(fill="x", padx=16, pady=10)
+
+        self.mod_status = ctk.CTkTextbox(tab, height=140, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
+        self.mod_status.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+
+        self._current_booking: dict | None = None
+
+    def _set_mod_status(self, text: str):
+        self.mod_status.configure(state="normal")
+        self.mod_status.delete("1.0", "end")
+        self.mod_status.insert("1.0", text)
+        self.mod_status.configure(state="disabled")
+
+    def _buscar_cita(self):
+        if not self._customer_ready():
+            self._set_mod_status("❌ Completá tus datos en «Mis datos» primero.")
+            return
+        self._set_mod_status("⏳ Buscando tu cita...")
+
+        def run():
+            c = self._customer
+            b = fetch_booking(c.get("vehicle_rego", ""), c.get("email", ""), c.get("phone", ""))
+            if not b:
+                self.mod_current.configure(text="No se encontró ninguna cita activa para tus datos.", text_color="gray")
+                self._set_mod_status("Sin cita activa.")
+                self._current_booking = None
+                self.mod_btn.configure(state="disabled")
+                return
+
+            self._current_booking = b
+            slot_cr = format_date(b["startDateTime"])
+            self.mod_current.configure(
+                text=f"📅 {slot_cr}  |  {b.get('locationName', '—')}  |  Placa {b.get('vehicleRego', '—')}",
+                text_color="white"
+            )
+            self._set_mod_status(f"Cita encontrada. ID: {b.get('id', '?')}\nPresioná «Modificar» para cambiarla.")
+            self.mod_btn.configure(state="normal")
+
+        Thread(target=run, daemon=True).start()
+
+    def _modificar_cita(self):
+        if not self._current_booking:
+            return
+        if not self._customer_ready():
+            self._set_mod_status("❌ Completá tus datos en «Mis datos» primero.")
+            return
+
+        try:
+            start_dt = datetime.strptime(self.mod_start.get(), "%Y-%m-%d")
+            end_dt   = datetime.strptime(self.mod_end.get(), "%Y-%m-%d")
+        except ValueError:
+            self._set_mod_status("❌ Fechas inválidas. Formato: YYYY-MM-DD")
+            return
+
+        self.mod_btn.configure(state="disabled", text="Modificando...")
+        self._set_mod_status("⏳ Verificando que se puede modificar...")
+
+        def run():
+            b        = self._current_booking
+            book_id  = b["id"]
+            loc_id   = b.get("locationId") or b.get("locationid") or b.get("locationID", "")
+
+            # Intentar obtener locationId del booking si no está directo
+            if not loc_id:
+                # buscarlo en el campo de la agencia seleccionada
+                loc_name = self.mod_loc_var.get()
+                loc_id   = self._locations.get(loc_name, "")
+
+            if not check_update_allowed(book_id):
+                self._set_mod_status("❌ Esta cita no se puede modificar (muy cerca de la fecha o ya expiró).")
+                self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
+                return
+
+            new_loc_name = self.mod_loc_var.get()
+            new_loc_id   = self._locations.get(new_loc_name, "")
+
+            self._set_mod_status("⏳ Buscando slots disponibles en nueva agencia...")
+            days = fetch_available_days(new_loc_id, start_dt.replace(tzinfo=timezone.utc), end_dt.replace(tzinfo=timezone.utc))
+            if not days:
+                self._set_mod_status(f"❌ Sin disponibilidad en {new_loc_name} para ese rango.")
+                self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
+                return
+
+            result   = None
+            selected = None
+            for day in days:
+                slots = fetch_time_slots(new_loc_id, day)
+                if not slots:
+                    continue
+                for s in slots[:3]:
+                    all_slots = fetch_time_slots(new_loc_id, day, selected_slot=s)
+                    selected  = next((x for x in all_slots if x.get("isFirstSelected")), s)
+                    confirm_timeslot(new_loc_id, selected)
+
+                    # Cancelar cita anterior justo antes de crear la nueva
+                    old_loc_id = b.get("locationId", b.get("locationid", b.get("locationID", new_loc_id)))
+                    old_slot   = {
+                        "time":            b["startDateTime"],
+                        "resourceIds":     b.get("resourceIds", []),
+                        "locationId":      old_loc_id,
+                        "productDuration": 5,
+                        "productId":       PRODUCT_ID,
+                        "productIndex":    0,
+                        "productName":     b.get("productName", "AUTOMÓVIL"),
+                    }
+                    release_timeslot(old_loc_id, old_slot)
+                    delete_booking(book_id)
+
+                    result = create_booking(new_loc_id, selected, all_slots, self._customer)
+                    if result and result.get("isSuccess"):
+                        break
+                    else:
+                        # Si falla el nuevo booking, informar — la cita vieja ya fue cancelada
+                        self._set_mod_status("⚠️ La cita anterior fue cancelada pero el nuevo booking falló.\nIntentá agendar manualmente en la web de DEKRA.")
+                        self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
+                        return
+                if result and result.get("isSuccess"):
+                    break
+
+            if result and result.get("isSuccess"):
+                items = result.get("bookingResultItems", [])
+                num   = items[0].get("reservationNumber", "?") if items else "?"
+                self._current_booking = None
+                self.mod_btn.configure(state="disabled", text="🔄 Modificar a primer slot disponible")
+                self.mod_current.configure(text="Cita modificada exitosamente.", text_color="lightgreen")
+                self._set_mod_status(
+                    f"✅ ¡CITA MODIFICADA!\n"
+                    f"{'─'*35}\n"
+                    f"Número:  {num}\n"
+                    f"Fecha:   {format_date(selected['time'])}\n"
+                    f"Agencia: {new_loc_name}\n"
+                    f"{'─'*35}\n"
+                    f"Revisá tu correo."
+                )
+            else:
+                self._set_mod_status(f"❌ No se pudo modificar.\nRespuesta: {result}")
+                self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
+
+        Thread(target=run, daemon=True).start()
 
     def _build_datos_tab(self, tab):
         pad = {"padx": 16, "pady": 6}
