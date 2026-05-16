@@ -9,6 +9,7 @@ from api import (fetch_locations, fetch_available_days, fetch_time_slots,
                  confirm_timeslot, create_booking, release_timeslot,
                  fetch_booking, check_update_allowed, delete_booking)
 from config import PRODUCT_ID
+from tkcalendar import DateEntry
 from monitor import monitor, format_date
 
 TZ_CR = ZoneInfo("America/Costa_Rica")
@@ -46,6 +47,22 @@ class App(ctk.CTk):
 
         if not self._customer.get("email"):
             self._tabs.set("Mis datos")
+
+    # ─── Helpers de UI ───────────────────────────────────────────────────────
+
+    def _date_picker(self, parent, initial: date) -> DateEntry:
+        return DateEntry(
+            parent,
+            date_pattern="yyyy-mm-dd",
+            year=initial.year, month=initial.month, day=initial.day,
+            background="#1f538d", foreground="white",
+            selectbackground="#1f538d", selectforeground="white",
+            headersbackground="#1a1a2e", headersforeground="white",
+            normalbackground="#2b2b2b", normalforeground="white",
+            weekendbackground="#2b2b2b", weekendforeground="#aaa",
+            othermonthbackground="#222", othermonthforeground="#555",
+            bordercolor="#555", font=("Helvetica", 11),
+        )
 
     # ─── Cargar agencias ──────────────────────────────────────────────────────
 
@@ -85,14 +102,12 @@ class App(ctk.CTk):
         left = ctk.CTkFrame(date_frame, fg_color="transparent")
         left.pack(side="left", expand=True, fill="x", padx=(0, 5))
         ctk.CTkLabel(left, text="Desde").pack(anchor="w")
-        self.start_entry = ctk.CTkEntry(left, placeholder_text="YYYY-MM-DD")
-        self.start_entry.insert(0, date.today().strftime("%Y-%m-%d"))
+        self.start_entry = self._date_picker(left, date.today())
         self.start_entry.pack(fill="x")
         right = ctk.CTkFrame(date_frame, fg_color="transparent")
         right.pack(side="right", expand=True, fill="x", padx=(5, 0))
         ctk.CTkLabel(right, text="Hasta").pack(anchor="w")
-        self.end_entry = ctk.CTkEntry(right, placeholder_text="YYYY-MM-DD")
-        self.end_entry.insert(0, (date.today() + timedelta(days=30)).strftime("%Y-%m-%d"))
+        self.end_entry = self._date_picker(right, date.today() + timedelta(days=30))
         self.end_entry.pack(fill="x")
 
         # ── Intervalo ──
@@ -173,14 +188,12 @@ class App(ctk.CTk):
         left = ctk.CTkFrame(date_frame, fg_color="transparent")
         left.pack(side="left", expand=True, fill="x", padx=(0, 5))
         ctk.CTkLabel(left, text="Desde").pack(anchor="w")
-        self.mod_start = ctk.CTkEntry(left, placeholder_text="YYYY-MM-DD")
-        self.mod_start.insert(0, date.today().strftime("%Y-%m-%d"))
+        self.mod_start = self._date_picker(left, date.today())
         self.mod_start.pack(fill="x")
         right = ctk.CTkFrame(date_frame, fg_color="transparent")
         right.pack(side="right", expand=True, fill="x", padx=(5, 0))
         ctk.CTkLabel(right, text="Hasta").pack(anchor="w")
-        self.mod_end = ctk.CTkEntry(right, placeholder_text="YYYY-MM-DD")
-        self.mod_end.insert(0, (date.today() + timedelta(days=30)).strftime("%Y-%m-%d"))
+        self.mod_end = self._date_picker(right, date.today() + timedelta(days=30))
         self.mod_end.pack(fill="x")
 
         self.mod_btn = ctk.CTkButton(tab, text="🔄 Modificar a primer slot disponible",
