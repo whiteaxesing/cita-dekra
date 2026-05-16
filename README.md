@@ -33,7 +33,11 @@ Esta app corre directamente en tu computadora: el monitoreo es infinito, ininter
 > Este paso es necesario porque la app no está firmada con un certificado de Apple. No afecta su funcionamiento.
 
 **Windows:**
-1. Doble clic en `CitaDEKRA.exe`
+1. Descomprimí el `.zip`
+2. Doble clic en `CitaDEKRA.exe`
+3. Si aparece una advertencia de Windows ("PC protegido" o "autor desconocido"), hacé clic en **Más información** → **Ejecutar de todos modos**
+
+> Esto ocurre porque la app no tiene firma digital de pago. No afecta su funcionamiento.
 
 ## Uso
 
