@@ -2,6 +2,7 @@ import customtkinter as ctk
 from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
 from threading import Thread
+import threading
 from pathlib import Path
 import json
 
@@ -233,10 +234,25 @@ class App(ctk.CTk):
                                          command=self._cancelar_cita, fg_color="#8b1a1a", state="disabled")
         self.cancel_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
-        self.mod_status = ctk.CTkTextbox(tab, height=140, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
+        # ── Auto-modificar ──
+        ctk.CTkLabel(tab, text="Monitoreo automático", font=ctk.CTkFont(weight="bold"), anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+        ctk.CTkLabel(tab, text="Busca un slot disponible y modifica tu cita automáticamente.", text_color="gray", anchor="w").pack(fill="x", padx=16)
+
+        auto_btn_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        auto_btn_frame.pack(fill="x", padx=16, pady=6)
+        self.automod_start_btn = ctk.CTkButton(auto_btn_frame, text="▶ Iniciar búsqueda",
+                                                command=self._start_automod, fg_color="green", state="disabled")
+        self.automod_start_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
+        self.automod_stop_btn = ctk.CTkButton(auto_btn_frame, text="⏹ Detener",
+                                               command=self._stop_automod, fg_color="gray", state="disabled")
+        self.automod_stop_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
+
+        self.mod_status = ctk.CTkTextbox(tab, height=110, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
         self.mod_status.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
         self._current_booking: dict | None = None
+        self._automod_thread: Thread | None = None
+        self._automod_stop  = threading.Event()
 
     def _set_mod_status(self, text: str):
         self.mod_status.configure(state="normal")
@@ -261,17 +277,119 @@ class App(ctk.CTk):
                 self._current_booking = None
                 self.mod_btn.configure(state="disabled")
                 self.cancel_btn.configure(state="disabled")
+                self.automod_start_btn.configure(state="disabled")
                 return
 
             self._current_booking = b
             self.mod_card_fecha.configure(text=f"📅  {format_date(b['startDateTime'])}", text_color="white")
             self.mod_card_agencia.configure(text=f"🏢  {b.get('locationName', '—')}", text_color="#aac4e0")
             self.mod_card_placa.configure(text=f"🚗  Placa {b.get('vehicleRego', '—')}", text_color="#aac4e0")
-            self._set_mod_status("Cita encontrada. Elegí la nueva agencia y fechas, y presioná «Modificar».")
+            self._set_mod_status("Cita encontrada. Elegí la nueva agencia y fechas, y presioná «Modificar» o «Iniciar búsqueda».")
             self.mod_btn.configure(state="normal")
             self.cancel_btn.configure(state="normal")
+            self.automod_start_btn.configure(state="normal")
 
         Thread(target=run, daemon=True).start()
+
+    def _start_automod(self):
+        if not self._current_booking:
+            return
+        try:
+            start_dt = datetime.strptime(self.mod_start.get(), "%Y-%m-%d")
+            end_dt   = datetime.strptime(self.mod_end.get(), "%Y-%m-%d")
+        except ValueError:
+            self._set_mod_status("❌ Fechas inválidas.")
+            return
+
+        self.automod_start_btn.configure(state="disabled")
+        self.automod_stop_btn.configure(state="normal")
+        self.mod_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="disabled")
+
+        self._automod_stop.clear()
+        self._automod_thread = Thread(target=self._automod_loop,
+                                       args=(start_dt, end_dt), daemon=True)
+        self._automod_thread.start()
+
+    def _stop_automod(self):
+        self._automod_stop.set()
+        self.automod_start_btn.configure(state="normal")
+        self.automod_stop_btn.configure(state="disabled")
+        self.mod_btn.configure(state="normal")
+        self.cancel_btn.configure(state="normal")
+        self._set_mod_status("Búsqueda automática detenida.")
+
+    def _automod_loop(self, start_dt: datetime, end_dt: datetime):
+        interval = int(self.interval_var.get()) * 60
+        new_loc_name = self.mod_loc_var.get()
+        new_loc_id   = self._locations.get(new_loc_name, "")
+        hr = self._hour_range(self.mod_time_enabled, self.mod_time_from, self.mod_time_to)
+
+        while not self._automod_stop.is_set():
+            self.after(0, lambda: self._set_mod_status(
+                f"⏳ Buscando en {new_loc_name}...\n"
+                f"Revisando cada {int(self.interval_var.get())} min."
+            ))
+            days = fetch_available_days(new_loc_id,
+                                        start_dt.replace(tzinfo=timezone.utc),
+                                        end_dt.replace(tzinfo=timezone.utc))
+            if days:
+                for day in days:
+                    if self._automod_stop.is_set():
+                        return
+                    slots = fetch_time_slots(new_loc_id, day)
+                    if hr:
+                        slots = self._filter_slots_by_hour(slots, hr[0], hr[1])
+                    if not slots:
+                        continue
+                    for s in slots[:3]:
+                        all_slots = fetch_time_slots(new_loc_id, day, selected_slot=s)
+                        selected  = next((x for x in all_slots if x.get("isFirstSelected")), s)
+                        confirm_timeslot(new_loc_id, selected)
+
+                        b          = self._current_booking
+                        old_loc_id = b.get("locationId", b.get("locationid", b.get("locationID", new_loc_id)))
+                        old_slot   = {
+                            "time":            b["startDateTime"],
+                            "resourceIds":     b.get("resourceIds", []),
+                            "locationId":      old_loc_id,
+                            "productDuration": 5,
+                            "productId":       PRODUCT_ID,
+                            "productIndex":    0,
+                            "productName":     b.get("productName", "AUTOMÓVIL"),
+                        }
+                        release_timeslot(old_loc_id, old_slot)
+                        delete_booking(b["id"])
+
+                        result = create_booking(new_loc_id, selected, all_slots, self._customer)
+                        if result and result.get("isSuccess"):
+                            items = result.get("bookingResultItems", [])
+                            num   = items[0].get("reservationNumber", "?") if items else "?"
+                            self.after(0, lambda n=num, sl=selected, loc=new_loc_name: self._on_automod_success(n, sl, loc))
+                            return
+            self._automod_stop.wait(timeout=interval)
+
+    def _on_automod_success(self, num: str, selected: dict, loc_name: str):
+        self._automod_stop.set()
+        self._current_booking = None
+        self.automod_start_btn.configure(state="disabled")
+        self.automod_stop_btn.configure(state="disabled")
+        self.mod_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="disabled")
+        self.mod_card_fecha.configure(text=f"📅  {format_date(selected['time'])}", text_color="lightgreen")
+        self.mod_card_agencia.configure(text=f"🏢  {loc_name}", text_color="#aac4e0")
+        self.mod_card_placa.configure(text=f"🚗  Número: {num}", text_color="#aac4e0")
+        self._set_mod_status(
+            f"✅ ¡CITA MODIFICADA!\n"
+            f"{'─'*30}\n"
+            f"Número:  {num}\n"
+            f"Fecha:   {format_date(selected['time'])}\n"
+            f"Agencia: {loc_name}\n"
+            f"{'─'*30}\n"
+            f"Revisá tu correo."
+        )
+        import monitor as _mon
+        _mon.trigger_booked_alert(loc_name, selected["time"], num, 1)
 
     def _cancelar_cita(self):
         if not self._current_booking:
