@@ -188,7 +188,12 @@ class App(ctk.CTk):
         self.status_label.pack(**pad)
 
         # ── Resultados ──
-        ctk.CTkLabel(tab, text="📅 Resultados", font=ctk.CTkFont(size=14, weight="bold"), anchor="w").pack(fill="x", **pad)
+        results_header = ctk.CTkFrame(tab, fg_color="transparent")
+        results_header.pack(fill="x", **pad)
+        ctk.CTkLabel(results_header, text="📅 Resultados", font=ctk.CTkFont(size=14, weight="bold"), anchor="w").pack(side="left")
+        self.pick_btn = ctk.CTkButton(results_header, text="Elegir horario →", width=130,
+                                      command=self._open_slot_picker, fg_color="#1a6aa0", state="disabled")
+        self.pick_btn.pack(side="right")
         self.results_box = ctk.CTkTextbox(tab, height=200, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
         self.results_box.pack(fill="both", expand=True, **pad)
 
@@ -579,6 +584,7 @@ class App(ctk.CTk):
                 self._set_results(texto)
                 self._stop()
             elif monitor.available_days:
+                self.pick_btn.configure(state="normal")
                 lines = []
                 if monitor.new_days:
                     lines.append("🆕 NUEVAS APERTURAS:")
@@ -590,15 +596,128 @@ class App(ctk.CTk):
                     lines.append(f"  · {format_date(d)}")
                 self._set_results("\n".join(lines))
             elif monitor.last_check:
+                self.pick_btn.configure(state="disabled")
                 self._set_results(f"Sin disponibilidad para el rango seleccionado.\nÚltima revisión: {monitor.last_check.strftime('%d/%m/%Y %H:%M:%S')}")
 
         self.after(10000, self._refresh)
+
+    def _open_slot_picker(self):
+        if not monitor.available_days:
+            return
+        hr = self._hour_range(self.time_enabled, self.time_from, self.time_to)
+        SlotPickerWindow(self, monitor.location_id, monitor.location_name,
+                         monitor.available_days, self._customer, hr)
 
     def _set_results(self, text: str):
         self.results_box.configure(state="normal")
         self.results_box.delete("1.0", "end")
         self.results_box.insert("1.0", text)
         self.results_box.configure(state="disabled")
+
+
+class SlotPickerWindow(ctk.CTkToplevel):
+    def __init__(self, parent, location_id, location_name, available_days, customer, hour_range):
+        super().__init__(parent)
+        self.title("Elegir horario")
+        self.geometry("520x560")
+        self.resizable(False, False)
+        self.grab_set()
+
+        self._location_id   = location_id
+        self._location_name = location_name
+        self._days          = available_days
+        self._customer      = customer
+        self._hour_range    = hour_range
+        self._selected_day  = None
+
+        ctk.CTkLabel(self, text=f"📅 {location_name}",
+                     font=ctk.CTkFont(size=16, weight="bold")).pack(padx=20, pady=(16, 4))
+        ctk.CTkLabel(self, text="Elegí el día y después el horario.", text_color="gray").pack()
+
+        # ── Días ──
+        ctk.CTkLabel(self, text="Días disponibles", anchor="w").pack(fill="x", padx=20, pady=(12, 4))
+        day_scroll = ctk.CTkScrollableFrame(self, height=140)
+        day_scroll.pack(fill="x", padx=20)
+        self._day_btns = []
+        for d in available_days:
+            btn = ctk.CTkButton(day_scroll, text=format_date(d), anchor="w",
+                                fg_color="transparent", hover_color="#1e3a5f",
+                                command=lambda day=d: self._load_slots(day))
+            btn.pack(fill="x", pady=2)
+            self._day_btns.append((d, btn))
+
+        # ── Slots ──
+        ctk.CTkLabel(self, text="Horarios disponibles", anchor="w").pack(fill="x", padx=20, pady=(12, 4))
+        self._slot_scroll = ctk.CTkScrollableFrame(self, height=180)
+        self._slot_scroll.pack(fill="x", padx=20)
+        self._slot_label = ctk.CTkLabel(self._slot_scroll, text="Seleccioná un día para ver los horarios.",
+                                        text_color="gray")
+        self._slot_label.pack()
+
+        self._status = ctk.CTkLabel(self, text="", text_color="lightgreen")
+        self._status.pack(pady=8)
+
+    def _load_slots(self, day: str):
+        for d, btn in self._day_btns:
+            btn.configure(fg_color="#1a6aa0" if d == day else "transparent")
+        self._selected_day = day
+
+        for w in self._slot_scroll.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(self._slot_scroll, text="Cargando horarios...", text_color="gray").pack()
+
+        def run():
+            from api import fetch_time_slots
+            slots = fetch_time_slots(self._location_id, day)
+            if self._hour_range:
+                h_from, h_to = self._hour_range
+                slots = [s for s in slots if h_from <=
+                         datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR).hour <= h_to]
+            self.after(0, lambda: self._show_slots(day, slots))
+
+        Thread(target=run, daemon=True).start()
+
+    def _show_slots(self, day: str, slots: list[dict]):
+        for w in self._slot_scroll.winfo_children():
+            w.destroy()
+        if not slots:
+            ctk.CTkLabel(self._slot_scroll, text="Sin horarios disponibles para este día.", text_color="gray").pack()
+            return
+        for s in slots:
+            dt    = datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR)
+            label = dt.strftime("%H:%M")
+            ctk.CTkButton(self._slot_scroll, text=label, width=80,
+                          command=lambda slot=s: self._book(day, slot)).pack(side="left", padx=4, pady=4)
+
+    def _book(self, day: str, slot: dict):
+        self._status.configure(text="⏳ Agendando...", text_color="gray")
+        for w in self._slot_scroll.winfo_children():
+            w.configure(state="disabled")
+
+        def run():
+            from api import fetch_time_slots, confirm_timeslot, create_booking
+            all_slots = fetch_time_slots(self._location_id, day, selected_slot=slot)
+            selected  = next((s for s in all_slots if s.get("isFirstSelected")), slot)
+            confirm_timeslot(self._location_id, selected)
+            result = create_booking(self._location_id, selected, all_slots, self._customer)
+            self.after(0, lambda: self._on_result(result, selected))
+
+        Thread(target=run, daemon=True).start()
+
+    def _on_result(self, result: dict | None, selected: dict):
+        if result and result.get("isSuccess"):
+            items = result.get("bookingResultItems", [])
+            num   = items[0].get("reservationNumber", "?") if items else "?"
+            self._status.configure(
+                text=f"✅ ¡Reservado! Número: {num}  ·  {format_date(selected['time'])}",
+                text_color="lightgreen"
+            )
+            trigger_booked_alert = __import__("monitor").trigger_booked_alert
+            trigger_booked_alert(self._location_name, selected["time"], num, 1)
+        else:
+            self._status.configure(text="❌ No se pudo agendar. Intentá con otro horario.", text_color="red")
+            for w in self._slot_scroll.winfo_children():
+                w.configure(state="normal")
 
 
 if __name__ == "__main__":
