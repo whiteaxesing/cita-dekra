@@ -36,9 +36,10 @@ class App(ctk.CTk):
 
     def _build_ui(self):
         pad = {"padx": 20, "pady": 6}
+        padx = {"padx": 20}
 
         # Título
-        ctk.CTkLabel(self, text="🚗 Cita DEKRA", font=ctk.CTkFont(size=22, weight="bold")).pack(**pad, pady=(20, 4))
+        ctk.CTkLabel(self, text="🚗 Cita DEKRA", font=ctk.CTkFont(size=22, weight="bold")).pack(padx=20, pady=(20, 4))
         ctk.CTkLabel(self, text="Monitor automático de disponibilidad", text_color="gray").pack(pady=(0, 10))
 
         # ── Agencia ──
@@ -82,9 +83,6 @@ class App(ctk.CTk):
         self.sound_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(sound_frame, text="🔊 Sonido al encontrar cita", variable=self.sound_var).pack(side="left")
 
-        self.sound_times_var = ctk.IntVar(value=5)
-        ctk.CTkLabel(sound_frame, text="  Repeticiones:").pack(side="left")
-        ctk.CTkEntry(sound_frame, textvariable=self.sound_times_var, width=50).pack(side="left")
 
         # ── Auto-booking ──
         self.autobook_var = ctk.BooleanVar(value=False)
@@ -96,12 +94,16 @@ class App(ctk.CTk):
 
         # ── Botones ──
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(fill="x", **pad, pady=12)
+        btn_frame.pack(fill="x", **padx, pady=12)
         self.start_btn = ctk.CTkButton(btn_frame, text="▶ Iniciar", command=self._start, fg_color="green")
         self.start_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
         self.stop_btn = ctk.CTkButton(btn_frame, text="⏹ Detener", command=self._stop,
                                        fg_color="gray", state="disabled")
         self.stop_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
+
+        self.test_btn = ctk.CTkButton(self, text="🧪 Probar booking ahora", command=self._test_booking,
+                                       fg_color="#555")
+        self.test_btn.pack(fill="x", **padx, pady=(0, 4))
 
         # ── Estado ──
         self.status_label = ctk.CTkLabel(self, text="Monitor detenido.", text_color="gray")
@@ -135,7 +137,7 @@ class App(ctk.CTk):
             end_date          = end_dt.replace(tzinfo=timezone.utc),
             interval_min      = int(self.interval_var.get()),
             sound_enabled     = self.sound_var.get(),
-            sound_times       = int(self.sound_times_var.get()),
+            sound_times       = 1,
             auto_book_enabled = self.autobook_var.get(),
         )
         monitor.start()
@@ -149,6 +151,73 @@ class App(ctk.CTk):
         self.stop_btn.configure(state="disabled")
         self.loc_menu.configure(state="normal")
         self.status_label.configure(text="Monitor detenido.", text_color="gray")
+
+    def _test_booking(self):
+        from api import fetch_time_slots, create_booking
+        from monitor import CUSTOMER
+
+        self.test_btn.configure(state="disabled", text="Probando...")
+        self._set_results("⏳ Buscando slots disponibles...")
+
+        def run():
+            loc_name = self.loc_var.get()
+            loc_id   = self._locations.get(loc_name)
+            try:
+                start_dt = datetime.strptime(self.start_entry.get(), "%Y-%m-%d")
+                end_dt   = datetime.strptime(self.end_entry.get(), "%Y-%m-%d")
+            except ValueError:
+                self._set_results("❌ Fechas inválidas.")
+                self.test_btn.configure(state="normal", text="🧪 Probar booking ahora")
+                return
+
+            from api import fetch_available_days
+            days = fetch_available_days(loc_id, start_dt.replace(tzinfo=timezone.utc), end_dt.replace(tzinfo=timezone.utc))
+            if not days:
+                self._set_results(f"❌ Sin días disponibles en {loc_name} para ese rango.")
+                self.test_btn.configure(state="normal", text="🧪 Probar booking ahora")
+                return
+
+            result = None
+            slot   = None
+            for day in days:
+                self._set_results(f"✅ Día: {day}\n⏳ Buscando slots...")
+                slots = fetch_time_slots(loc_id, day)
+                if not slots:
+                    continue
+                for s in slots[:3]:
+                    self._set_results(f"✅ Día: {day}\n⏳ Probando slot {s['time']}...")
+                    all_slots = fetch_time_slots(loc_id, day, selected_slot=s)
+                    selected  = next((x for x in all_slots if x.get("isFirstSelected")), s)
+                    from api import confirm_timeslot
+                    confirm_timeslot(loc_id, selected)
+                    result = create_booking(loc_id, selected, all_slots, CUSTOMER)
+                    if result and result.get("isSuccess"):
+                        slot = selected
+                        break
+                if result and result.get("isSuccess"):
+                    break
+
+            if result and result.get("isSuccess"):
+                items = result.get("bookingResultItems", [])
+                num   = items[0].get("reservationNumber", "?") if items else "?"
+                bid   = items[0].get("bookingId", "?") if items else "?"
+                self._set_results(
+                    f"✅ ¡RESERVA EXITOSA!\n"
+                    f"{'─'*35}\n"
+                    f"Número:    {num}\n"
+                    f"bookingId: {bid}\n"
+                    f"Slot:      {slot['time']}\n"
+                    f"Agencia:   {loc_name}\n"
+                    f"Placa:     {customer.VEHICLE_REGO}\n"
+                    f"{'─'*35}\n"
+                    f"Revisá tu correo."
+                )
+            else:
+                self._set_results(f"❌ La reserva falló.\nRespuesta: {result}")
+
+            self.test_btn.configure(state="normal", text="🧪 Probar booking ahora")
+
+        Thread(target=run, daemon=True).start()
 
     # ─── Refresh ──────────────────────────────────────────────────────────────
 

@@ -141,9 +141,9 @@ else:
         with col2:
             st.code(d, language=None)
 
-# ─── Refresh ──────────────────────────────────────────────────────────────────
+# ─── Auto-refresh ─────────────────────────────────────────────────────────────
 
 if monitor.running:
-    st.markdown("---")
-    if st.button("🔄 Actualizar resultados"):
-        st.rerun()
+    import time
+    time.sleep(10)
+    st.rerun()

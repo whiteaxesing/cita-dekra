@@ -6,3 +6,4 @@ dekra-state.json
 dekra-availability.md
 .DS_Store
 customer.py
+dekra-http.log

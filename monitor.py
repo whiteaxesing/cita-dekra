@@ -20,9 +20,8 @@ CUSTOMER = {
 }
 
 
-def _play_glass(times: int):
-    for _ in range(times):
-        subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"]).wait()
+def _play_glass(times: int = 1):
+    subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"]).wait()
 
 
 def _speak(msg: str):
@@ -83,22 +82,24 @@ def auto_book(location_id: str, location_name: str, available_days: list[str], s
         if not slots:
             continue
 
-        slot = slots[0]  # primer slot disponible
-        confirmed = confirm_timeslot(location_id, slot)
-        if not confirmed:
-            continue
+        for slot in slots[:3]:
+            # Segunda llamada con el slot elegido — el server marca isFirstSelected=True
+            all_slots = fetch_time_slots(location_id, day, selected_slot=slot)
+            selected = next((s for s in all_slots if s.get("isFirstSelected")), slot)
 
-        result = create_booking(location_id, slot, CUSTOMER)
-        if result and result.get("isSuccess"):
-            items = result.get("bookingResultItems", [])
-            reservation = items[0].get("reservationNumber", "?") if items else "?"
-            trigger_booked_alert(location_name, slot["time"], reservation, sound_times)
-            return {
-                "reservationNumber": reservation,
-                "bookingId":         items[0].get("bookingId") if items else None,
-                "slot":              slot,
-                "day":               day,
-            }
+            confirm_timeslot(location_id, selected)
+
+            result = create_booking(location_id, selected, all_slots, CUSTOMER)
+            if result and result.get("isSuccess"):
+                items = result.get("bookingResultItems", [])
+                reservation = items[0].get("reservationNumber", "?") if items else "?"
+                trigger_booked_alert(location_name, slot["time"], reservation, sound_times)
+                return {
+                    "reservationNumber": reservation,
+                    "bookingId":         items[0].get("bookingId") if items else None,
+                    "slot":              selected,
+                    "day":               day,
+                }
 
     return None
 
