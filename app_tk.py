@@ -180,10 +180,6 @@ class App(ctk.CTk):
                                        fg_color="gray", state="disabled")
         self.stop_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
-        self.test_btn = ctk.CTkButton(tab, text="🧪 Probar booking ahora", command=self._test_booking,
-                                       fg_color="#555")
-        self.test_btn.pack(fill="x", **padx, pady=(0, 4))
-
         # ── Estado ──
         self.status_label = ctk.CTkLabel(tab, text="Monitor detenido.", text_color="gray")
         self.status_label.pack(**pad)
