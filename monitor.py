@@ -65,11 +65,24 @@ def format_date(iso: str) -> str:
     return f"{dias[dt.weekday()]} {dt.day} {meses[dt.month - 1]} {dt.year} {dt.strftime('%H:%M')}"
 
 
+def _filter_by_hour(slots: list[dict], hour_range: tuple[int, int] | None) -> list[dict]:
+    if not hour_range:
+        return slots
+    h_from, h_to = hour_range
+    result = []
+    for s in slots:
+        dt = datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR)
+        if h_from <= dt.hour <= h_to:
+            result.append(s)
+    return result
+
+
 def auto_book(location_id: str, location_name: str, available_days: list[str],
-              customer: dict, sound_times: int) -> dict | None:
+              customer: dict, sound_times: int,
+              hour_range: tuple[int, int] | None = None) -> dict | None:
     """Toma el primer día disponible, agarra el primer slot y reserva. Devuelve resultado o None."""
     for day in available_days:
-        slots = fetch_time_slots(location_id, day)
+        slots = _filter_by_hour(fetch_time_slots(location_id, day), hour_range)
         if not slots:
             continue
 
@@ -113,11 +126,13 @@ class Monitor:
         self.sound_times       = 1
         self.auto_book_enabled = False
         self.customer: dict    = {}
+        self.hour_range: tuple[int, int] | None = None
 
     def configure(self, location_id: str, location_name: str,
                   start_date: datetime, end_date: datetime,
                   interval_min: int, sound_enabled: bool, sound_times: int,
-                  auto_book_enabled: bool, customer: dict):
+                  auto_book_enabled: bool, customer: dict,
+                  hour_range: tuple[int, int] | None = None):
         self.location_id       = location_id
         self.location_name     = location_name
         self.start_date        = start_date
@@ -127,6 +142,7 @@ class Monitor:
         self.sound_times       = sound_times
         self.auto_book_enabled = auto_book_enabled
         self.customer          = customer
+        self.hour_range        = hour_range
 
     def start(self):
         if self.running:
@@ -164,7 +180,7 @@ class Monitor:
             trigger_alert(self.location_name, self.sound_times)
 
         if days and self.auto_book_enabled and not self.booking_result:
-            result = auto_book(self.location_id, self.location_name, days, self.customer, self.sound_times)
+            result = auto_book(self.location_id, self.location_name, days, self.customer, self.sound_times, self.hour_range)
             if result:
                 self.booking_result = result
 

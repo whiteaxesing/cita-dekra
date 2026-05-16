@@ -50,6 +50,39 @@ class App(ctk.CTk):
 
     # ─── Helpers de UI ───────────────────────────────────────────────────────
 
+    def _filter_slots_by_hour(self, slots: list[dict], hour_from: int, hour_to: int) -> list[dict]:
+        result = []
+        for s in slots:
+            dt = datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR)
+            if hour_from <= dt.hour <= hour_to:
+                result.append(s)
+        return result
+
+    def _build_time_filter(self, parent, pad) -> tuple[ctk.BooleanVar, ctk.StringVar, ctk.StringVar]:
+        """Retorna (enabled_var, from_var, to_var). El frame de horas se muestra/oculta con el toggle."""
+        enabled_var = ctk.BooleanVar(value=False)
+        from_var    = ctk.StringVar(value="7:00")
+        to_var      = ctk.StringVar(value="17:00")
+        hours       = [f"{h}:00" for h in range(5, 20)]
+
+        toggle_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        toggle_frame.pack(fill="x", **pad)
+        ctk.CTkSwitch(toggle_frame, text="🕐 Filtrar por horario", variable=enabled_var,
+                      command=lambda: hour_frame.pack(fill="x", **pad) if enabled_var.get()
+                                      else hour_frame.pack_forget()).pack(side="left")
+
+        hour_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        left  = ctk.CTkFrame(hour_frame, fg_color="transparent")
+        left.pack(side="left", expand=True, fill="x", padx=(0, 5))
+        ctk.CTkLabel(left, text="Desde las").pack(anchor="w")
+        ctk.CTkOptionMenu(left, variable=from_var, values=hours).pack(fill="x")
+        right = ctk.CTkFrame(hour_frame, fg_color="transparent")
+        right.pack(side="right", expand=True, fill="x", padx=(5, 0))
+        ctk.CTkLabel(right, text="Hasta las").pack(anchor="w")
+        ctk.CTkOptionMenu(right, variable=to_var, values=hours).pack(fill="x")
+
+        return enabled_var, from_var, to_var
+
     def _date_picker(self, parent, initial: date) -> DateEntry:
         return DateEntry(
             parent,
@@ -109,6 +142,9 @@ class App(ctk.CTk):
         ctk.CTkLabel(right, text="Hasta").pack(anchor="w")
         self.end_entry = self._date_picker(right, date.today() + timedelta(days=30))
         self.end_entry.pack(fill="x")
+
+        # ── Filtro de horario ──
+        self.time_enabled, self.time_from, self.time_to = self._build_time_filter(tab, pad)
 
         # ── Intervalo ──
         ctk.CTkLabel(tab, text="Revisar cada (minutos)", anchor="w").pack(fill="x", **pad)
@@ -196,6 +232,8 @@ class App(ctk.CTk):
         self.mod_end = self._date_picker(right, date.today() + timedelta(days=30))
         self.mod_end.pack(fill="x")
 
+        self.mod_time_enabled, self.mod_time_from, self.mod_time_to = self._build_time_filter(tab, pad)
+
         self.mod_btn = ctk.CTkButton(tab, text="🔄 Modificar a primer slot disponible",
                                       command=self._modificar_cita, fg_color="#1a6aa0", state="disabled")
         self.mod_btn.pack(fill="x", padx=16, pady=10)
@@ -281,10 +319,13 @@ class App(ctk.CTk):
                 self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
                 return
 
-            result   = None
+            hr     = self._hour_range(self.mod_time_enabled, self.mod_time_from, self.mod_time_to)
+            result = None
             selected = None
             for day in days:
                 slots = fetch_time_slots(new_loc_id, day)
+                if hr:
+                    slots = self._filter_slots_by_hour(slots, hr[0], hr[1])
                 if not slots:
                     continue
                 for s in slots[:3]:
@@ -368,6 +409,11 @@ class App(ctk.CTk):
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
+    def _hour_range(self, enabled_var, from_var, to_var) -> tuple[int, int] | None:
+        if not enabled_var.get():
+            return None
+        return int(from_var.get().split(":")[0]), int(to_var.get().split(":")[0])
+
     def _customer_summary(self) -> str:
         c = self._customer
         name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
@@ -421,6 +467,7 @@ class App(ctk.CTk):
             sound_times       = 1,
             auto_book_enabled = self.autobook_var.get(),
             customer          = self._customer,
+            hour_range        = self._hour_range(self.time_enabled, self.time_from, self.time_to),
         )
         monitor.start()
         self.start_btn.configure(state="disabled")
@@ -460,11 +507,14 @@ class App(ctk.CTk):
                 self.test_btn.configure(state="normal", text="🧪 Probar booking ahora")
                 return
 
-            result   = None
+            hr     = self._hour_range(self.time_enabled, self.time_from, self.time_to)
+            result = None
             selected = None
             for day in days:
                 self._set_results(f"✅ Día: {day}\n⏳ Buscando slots...")
                 slots = fetch_time_slots(loc_id, day)
+                if hr:
+                    slots = self._filter_slots_by_hour(slots, hr[0], hr[1])
                 if not slots:
                     continue
                 for s in slots[:3]:
