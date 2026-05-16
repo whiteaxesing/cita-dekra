@@ -683,11 +683,15 @@ class SlotPickerWindow(ctk.CTkToplevel):
         if not slots:
             ctk.CTkLabel(self._slot_scroll, text="Sin horarios disponibles para este día.", text_color="gray").pack()
             return
-        for s in slots:
+        row = None
+        for i, s in enumerate(slots):
+            if i % 4 == 0:
+                row = ctk.CTkFrame(self._slot_scroll, fg_color="transparent")
+                row.pack(fill="x", pady=2)
             dt    = datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR)
             label = dt.strftime("%H:%M")
-            ctk.CTkButton(self._slot_scroll, text=label, width=80,
-                          command=lambda slot=s: self._book(day, slot)).pack(side="left", padx=4, pady=4)
+            ctk.CTkButton(row, text=label, width=100,
+                          command=lambda slot=s: self._book(day, slot)).pack(side="left", padx=4)
 
     def _book(self, day: str, slot: dict):
         self._status.configure(text="⏳ Agendando...", text_color="gray")
