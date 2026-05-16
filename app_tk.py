@@ -2,29 +2,47 @@ import customtkinter as ctk
 from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
 from threading import Thread
+from pathlib import Path
+import json
 
-from api import fetch_locations
+from api import fetch_locations, fetch_available_days, fetch_time_slots, confirm_timeslot, create_booking
 from monitor import monitor, format_date
-import customer
 
 TZ_CR = ZoneInfo("America/Costa_Rica")
+CUSTOMER_FILE = Path.home() / ".cita_dekra.json"
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
+def load_customer() -> dict:
+    if CUSTOMER_FILE.exists():
+        try:
+            return json.loads(CUSTOMER_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def save_customer(data: dict):
+    CUSTOMER_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-
         self.title("🚗 Cita DEKRA")
-        self.geometry("700x780")
+        self.geometry("700x860")
         self.resizable(False, False)
 
         self._locations: dict[str, str] = {}
+        self._customer = load_customer()
         self._load_locations()
         self._build_ui()
         self._refresh()
+
+        if not self._customer.get("email"):
+            self._tabs.set("Mis datos")
 
     # ─── Cargar agencias ──────────────────────────────────────────────────────
 
@@ -35,30 +53,36 @@ class App(ctk.CTk):
     # ─── UI ───────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        pad = {"padx": 20, "pady": 6}
-        padx = {"padx": 20}
-
-        # Título
         ctk.CTkLabel(self, text="🚗 Cita DEKRA", font=ctk.CTkFont(size=22, weight="bold")).pack(padx=20, pady=(20, 4))
         ctk.CTkLabel(self, text="Monitor automático de disponibilidad", text_color="gray").pack(pady=(0, 10))
 
+        self._tabs = ctk.CTkTabview(self)
+        self._tabs.pack(fill="both", expand=True, padx=20, pady=(0, 16))
+        self._tabs.add("Monitor")
+        self._tabs.add("Mis datos")
+
+        self._build_monitor_tab(self._tabs.tab("Monitor"))
+        self._build_datos_tab(self._tabs.tab("Mis datos"))
+
+    def _build_monitor_tab(self, tab):
+        pad  = {"padx": 16, "pady": 6}
+        padx = {"padx": 16}
+
         # ── Agencia ──
-        ctk.CTkLabel(self, text="Agencia", anchor="w").pack(fill="x", **pad)
+        ctk.CTkLabel(tab, text="Agencia", anchor="w").pack(fill="x", **pad)
         self.loc_var = ctk.StringVar(value=sorted(self._locations.keys())[0] if self._locations else "")
-        self.loc_menu = ctk.CTkOptionMenu(self, variable=self.loc_var, values=sorted(self._locations.keys()))
+        self.loc_menu = ctk.CTkOptionMenu(tab, variable=self.loc_var, values=sorted(self._locations.keys()))
         self.loc_menu.pack(fill="x", **pad)
 
         # ── Fechas ──
-        date_frame = ctk.CTkFrame(self, fg_color="transparent")
+        date_frame = ctk.CTkFrame(tab, fg_color="transparent")
         date_frame.pack(fill="x", **pad)
-
         left = ctk.CTkFrame(date_frame, fg_color="transparent")
         left.pack(side="left", expand=True, fill="x", padx=(0, 5))
         ctk.CTkLabel(left, text="Desde").pack(anchor="w")
         self.start_entry = ctk.CTkEntry(left, placeholder_text="YYYY-MM-DD")
         self.start_entry.insert(0, date.today().strftime("%Y-%m-%d"))
         self.start_entry.pack(fill="x")
-
         right = ctk.CTkFrame(date_frame, fg_color="transparent")
         right.pack(side="right", expand=True, fill="x", padx=(5, 0))
         ctk.CTkLabel(right, text="Hasta").pack(anchor="w")
@@ -67,9 +91,9 @@ class App(ctk.CTk):
         self.end_entry.pack(fill="x")
 
         # ── Intervalo ──
-        ctk.CTkLabel(self, text="Revisar cada (minutos)", anchor="w").pack(fill="x", **pad)
+        ctk.CTkLabel(tab, text="Revisar cada (minutos)", anchor="w").pack(fill="x", **pad)
         self.interval_var = ctk.IntVar(value=5)
-        interval_frame = ctk.CTkFrame(self, fg_color="transparent")
+        interval_frame = ctk.CTkFrame(tab, fg_color="transparent")
         interval_frame.pack(fill="x", **pad)
         self.interval_slider = ctk.CTkSlider(interval_frame, from_=1, to=30, variable=self.interval_var,
                                               command=lambda v: self.interval_label.configure(text=f"{int(v)} min"))
@@ -78,22 +102,20 @@ class App(ctk.CTk):
         self.interval_label.pack(side="right")
 
         # ── Sonido ──
-        sound_frame = ctk.CTkFrame(self, fg_color="transparent")
+        sound_frame = ctk.CTkFrame(tab, fg_color="transparent")
         sound_frame.pack(fill="x", **pad)
         self.sound_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(sound_frame, text="🔊 Sonido al encontrar cita", variable=self.sound_var).pack(side="left")
 
-
         # ── Auto-booking ──
         self.autobook_var = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(self, text="🤖 Auto-agendar cuando encuentre cita",
+        ctk.CTkSwitch(tab, text="🤖 Auto-agendar cuando encuentre cita",
                       variable=self.autobook_var).pack(fill="x", **pad)
-        ctk.CTkLabel(self,
-                     text=f"  {customer.FIRST_NAME} {customer.LAST_NAME} · Placa {customer.VEHICLE_REGO}",
-                     text_color="gray", anchor="w").pack(fill="x", padx=20)
+        self.customer_label = ctk.CTkLabel(tab, text=self._customer_summary(), text_color="gray", anchor="w")
+        self.customer_label.pack(fill="x", padx=16)
 
         # ── Botones ──
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame = ctk.CTkFrame(tab, fg_color="transparent")
         btn_frame.pack(fill="x", **padx, pady=12)
         self.start_btn = ctk.CTkButton(btn_frame, text="▶ Iniciar", command=self._start, fg_color="green")
         self.start_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
@@ -101,22 +123,79 @@ class App(ctk.CTk):
                                        fg_color="gray", state="disabled")
         self.stop_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
-        self.test_btn = ctk.CTkButton(self, text="🧪 Probar booking ahora", command=self._test_booking,
+        self.test_btn = ctk.CTkButton(tab, text="🧪 Probar booking ahora", command=self._test_booking,
                                        fg_color="#555")
         self.test_btn.pack(fill="x", **padx, pady=(0, 4))
 
         # ── Estado ──
-        self.status_label = ctk.CTkLabel(self, text="Monitor detenido.", text_color="gray")
+        self.status_label = ctk.CTkLabel(tab, text="Monitor detenido.", text_color="gray")
         self.status_label.pack(**pad)
 
         # ── Resultados ──
-        ctk.CTkLabel(self, text="📅 Resultados", font=ctk.CTkFont(size=14, weight="bold"), anchor="w").pack(fill="x", **pad)
-        self.results_box = ctk.CTkTextbox(self, height=280, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
+        ctk.CTkLabel(tab, text="📅 Resultados", font=ctk.CTkFont(size=14, weight="bold"), anchor="w").pack(fill="x", **pad)
+        self.results_box = ctk.CTkTextbox(tab, height=200, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
         self.results_box.pack(fill="both", expand=True, **pad)
+
+    def _build_datos_tab(self, tab):
+        pad = {"padx": 16, "pady": 6}
+        c   = self._customer
+
+        ctk.CTkLabel(tab, text="Tus datos personales", font=ctk.CTkFont(size=15, weight="bold"), anchor="w").pack(fill="x", **pad)
+        ctk.CTkLabel(tab, text="Se guardan en tu computadora. Nunca se comparten.", text_color="gray", anchor="w").pack(fill="x", padx=16)
+
+        fields = [
+            ("Nombre",              "first_name",   c.get("first_name",   "")),
+            ("Apellidos",           "last_name",    c.get("last_name",    "")),
+            ("Correo electrónico",  "email",        c.get("email",        "")),
+            ("Teléfono",            "phone",        c.get("phone",        "")),
+            ("Código de país",      "country_code", c.get("country_code", "+506")),
+            ("Número de placa",     "vehicle_rego", c.get("vehicle_rego", "")),
+        ]
+
+        self._field_entries: dict[str, ctk.CTkEntry] = {}
+        for label, key, value in fields:
+            ctk.CTkLabel(tab, text=label, anchor="w").pack(fill="x", **pad)
+            entry = ctk.CTkEntry(tab)
+            entry.insert(0, value)
+            entry.pack(fill="x", **pad)
+            self._field_entries[key] = entry
+
+        ctk.CTkButton(tab, text="💾 Guardar datos", command=self._save_customer, fg_color="green").pack(
+            fill="x", padx=16, pady=12)
+        self.save_status = ctk.CTkLabel(tab, text="")
+        self.save_status.pack()
+
+    # ─── Helpers ──────────────────────────────────────────────────────────────
+
+    def _customer_summary(self) -> str:
+        c = self._customer
+        name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip()
+        rego = c.get("vehicle_rego", "")
+        if not name and not rego:
+            return "  ⚠ Completá tus datos en la pestaña «Mis datos»"
+        return f"  {name} · Placa {rego}"
+
+    def _customer_ready(self) -> bool:
+        return bool(self._customer.get("email") and self._customer.get("vehicle_rego"))
 
     # ─── Acciones ─────────────────────────────────────────────────────────────
 
+    def _save_customer(self):
+        data = {key: entry.get().strip() for key, entry in self._field_entries.items()}
+        if not data.get("email") or not data.get("vehicle_rego"):
+            self.save_status.configure(text="❌ Correo y placa son obligatorios.", text_color="red")
+            return
+        self._customer = data
+        save_customer(data)
+        self.customer_label.configure(text=self._customer_summary())
+        self.save_status.configure(text="✅ Datos guardados.", text_color="lightgreen")
+
     def _start(self):
+        if self.autobook_var.get() and not self._customer_ready():
+            self._set_results("❌ Completá tus datos en la pestaña «Mis datos» antes de activar el auto-agendado.")
+            self._tabs.set("Mis datos")
+            return
+
         try:
             start_dt = datetime.strptime(self.start_entry.get(), "%Y-%m-%d")
             end_dt   = datetime.strptime(self.end_entry.get(),   "%Y-%m-%d")
@@ -139,6 +218,7 @@ class App(ctk.CTk):
             sound_enabled     = self.sound_var.get(),
             sound_times       = 1,
             auto_book_enabled = self.autobook_var.get(),
+            customer          = self._customer,
         )
         monitor.start()
         self.start_btn.configure(state="disabled")
@@ -153,8 +233,10 @@ class App(ctk.CTk):
         self.status_label.configure(text="Monitor detenido.", text_color="gray")
 
     def _test_booking(self):
-        from api import fetch_time_slots, create_booking
-        from monitor import CUSTOMER
+        if not self._customer_ready():
+            self._set_results("❌ Completá tus datos en la pestaña «Mis datos» primero.")
+            self._tabs.set("Mis datos")
+            return
 
         self.test_btn.configure(state="disabled", text="Probando...")
         self._set_results("⏳ Buscando slots disponibles...")
@@ -170,15 +252,14 @@ class App(ctk.CTk):
                 self.test_btn.configure(state="normal", text="🧪 Probar booking ahora")
                 return
 
-            from api import fetch_available_days
             days = fetch_available_days(loc_id, start_dt.replace(tzinfo=timezone.utc), end_dt.replace(tzinfo=timezone.utc))
             if not days:
                 self._set_results(f"❌ Sin días disponibles en {loc_name} para ese rango.")
                 self.test_btn.configure(state="normal", text="🧪 Probar booking ahora")
                 return
 
-            result = None
-            slot   = None
+            result   = None
+            selected = None
             for day in days:
                 self._set_results(f"✅ Día: {day}\n⏳ Buscando slots...")
                 slots = fetch_time_slots(loc_id, day)
@@ -188,11 +269,9 @@ class App(ctk.CTk):
                     self._set_results(f"✅ Día: {day}\n⏳ Probando slot {s['time']}...")
                     all_slots = fetch_time_slots(loc_id, day, selected_slot=s)
                     selected  = next((x for x in all_slots if x.get("isFirstSelected")), s)
-                    from api import confirm_timeslot
                     confirm_timeslot(loc_id, selected)
-                    result = create_booking(loc_id, selected, all_slots, CUSTOMER)
+                    result = create_booking(loc_id, selected, all_slots, self._customer)
                     if result and result.get("isSuccess"):
-                        slot = selected
                         break
                 if result and result.get("isSuccess"):
                     break
@@ -201,14 +280,15 @@ class App(ctk.CTk):
                 items = result.get("bookingResultItems", [])
                 num   = items[0].get("reservationNumber", "?") if items else "?"
                 bid   = items[0].get("bookingId", "?") if items else "?"
+                rego  = self._customer.get("vehicle_rego", "—")
                 self._set_results(
                     f"✅ ¡RESERVA EXITOSA!\n"
                     f"{'─'*35}\n"
                     f"Número:    {num}\n"
                     f"bookingId: {bid}\n"
-                    f"Slot:      {slot['time']}\n"
+                    f"Slot:      {selected['time'] if selected else '?'}\n"
                     f"Agencia:   {loc_name}\n"
-                    f"Placa:     {customer.VEHICLE_REGO}\n"
+                    f"Placa:     {rego}\n"
                     f"{'─'*35}\n"
                     f"Revisá tu correo."
                 )
@@ -231,14 +311,15 @@ class App(ctk.CTk):
             )
 
             if monitor.booking_result:
-                r = monitor.booking_result
+                r    = monitor.booking_result
+                rego = self._customer.get("vehicle_rego", "—")
                 texto = (
                     f"✅ ¡CITA AGENDADA!\n"
                     f"{'─'*40}\n"
                     f"Número:  {r['reservationNumber']}\n"
                     f"Fecha:   {format_date(r['slot']['time'])}\n"
                     f"Agencia: {monitor.location_name}\n"
-                    f"Placa:   {customer.VEHICLE_REGO}\n"
+                    f"Placa:   {rego}\n"
                     f"ID:      {r['bookingId']}\n"
                     f"{'─'*40}\n"
                     f"Revisá tu correo para la confirmación."
@@ -259,7 +340,7 @@ class App(ctk.CTk):
             elif monitor.last_check:
                 self._set_results(f"Sin disponibilidad para el rango seleccionado.\nÚltima revisión: {monitor.last_check.strftime('%d/%m/%Y %H:%M:%S')}")
 
-        self.after(10000, self._refresh)  # refresca cada 10 seg
+        self.after(10000, self._refresh)
 
     def _set_results(self, text: str):
         self.results_box.configure(state="normal")

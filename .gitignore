@@ -5,6 +5,7 @@ __pycache__/
 dekra-state.json
 dekra-availability.md
 .DS_Store
+.cita_dekra.json
 customer.py
 dekra-http.log
 *.har

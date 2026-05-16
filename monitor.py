@@ -5,19 +5,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import customer
 from api import fetch_available_days, fetch_time_slots, confirm_timeslot, create_booking
 
 TZ_CR = ZoneInfo("America/Costa_Rica")
-
-CUSTOMER = {
-    "first_name":   customer.FIRST_NAME,
-    "last_name":    customer.LAST_NAME,
-    "email":        customer.EMAIL,
-    "phone":        customer.PHONE,
-    "country_code": customer.COUNTRY_CODE,
-    "vehicle_rego": customer.VEHICLE_REGO,
-}
 
 
 def _play_glass(times: int = 1):
@@ -75,7 +65,8 @@ def format_date(iso: str) -> str:
     return f"{dias[dt.weekday()]} {dt.day} {meses[dt.month - 1]} {dt.year} {dt.strftime('%H:%M')}"
 
 
-def auto_book(location_id: str, location_name: str, available_days: list[str], sound_times: int) -> dict | None:
+def auto_book(location_id: str, location_name: str, available_days: list[str],
+              customer: dict, sound_times: int) -> dict | None:
     """Toma el primer día disponible, agarra el primer slot y reserva. Devuelve resultado o None."""
     for day in available_days:
         slots = fetch_time_slots(location_id, day)
@@ -83,13 +74,10 @@ def auto_book(location_id: str, location_name: str, available_days: list[str], s
             continue
 
         for slot in slots[:3]:
-            # Segunda llamada con el slot elegido — el server marca isFirstSelected=True
             all_slots = fetch_time_slots(location_id, day, selected_slot=slot)
-            selected = next((s for s in all_slots if s.get("isFirstSelected")), slot)
-
+            selected  = next((s for s in all_slots if s.get("isFirstSelected")), slot)
             confirm_timeslot(location_id, selected)
-
-            result = create_booking(location_id, selected, all_slots, CUSTOMER)
+            result = create_booking(location_id, selected, all_slots, customer)
             if result and result.get("isSuccess"):
                 items = result.get("bookingResultItems", [])
                 reservation = items[0].get("reservationNumber", "?") if items else "?"
@@ -121,14 +109,15 @@ class Monitor:
         self.start_date     = datetime.now(timezone.utc)
         self.end_date       = datetime.now(timezone.utc) + timedelta(days=30)
         self.interval_min   = 5
-        self.sound_enabled  = True
-        self.sound_times    = 5
+        self.sound_enabled     = True
+        self.sound_times       = 1
         self.auto_book_enabled = False
+        self.customer: dict    = {}
 
     def configure(self, location_id: str, location_name: str,
                   start_date: datetime, end_date: datetime,
                   interval_min: int, sound_enabled: bool, sound_times: int,
-                  auto_book_enabled: bool):
+                  auto_book_enabled: bool, customer: dict):
         self.location_id       = location_id
         self.location_name     = location_name
         self.start_date        = start_date
@@ -137,6 +126,7 @@ class Monitor:
         self.sound_enabled     = sound_enabled
         self.sound_times       = sound_times
         self.auto_book_enabled = auto_book_enabled
+        self.customer          = customer
 
     def start(self):
         if self.running:
@@ -174,7 +164,7 @@ class Monitor:
             trigger_alert(self.location_name, self.sound_times)
 
         if days and self.auto_book_enabled and not self.booking_result:
-            result = auto_book(self.location_id, self.location_name, days, self.sound_times)
+            result = auto_book(self.location_id, self.location_name, days, self.customer, self.sound_times)
             if result:
                 self.booking_result = result
 
