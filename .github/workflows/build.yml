@@ -43,6 +43,7 @@ jobs:
         run: |
           pyinstaller --onefile --windowed `
             --collect-all customtkinter `
+            --collect-all tzdata `
             --name CitaDEKRA `
             app_tk.py
 

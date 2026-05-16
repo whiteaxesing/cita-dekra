@@ -37,7 +37,8 @@ class App(ctk.CTk):
         super().__init__()
         self.title("🚗 Cita DEKRA")
         self.geometry("700x860")
-        self.resizable(False, False)
+        self.minsize(500, 600)
+        self.resizable(True, True)
 
         self._locations: dict[str, str] = {}
         self._customer = load_customer()

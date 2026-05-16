@@ -1,6 +1,12 @@
 # 🚗 Cita DEKRA
 
-Monitor de disponibilidad de citas DEKRA Costa Rica. Revisa automáticamente si hay espacio disponible en la agencia que elijas y te avisa con sonido y voz en cuanto aparezca algo. Si querés, puede agendar la cita por vos automáticamente.
+Agendador automático de citas DEKRA Costa Rica. Monitorea la disponibilidad en las agencias que elijas y reserva tu cita en cuanto aparezca un espacio libre.
+
+## Por qué una app local y no una página web
+
+Una página web depende de un servidor que ejecute el monitoreo en segundo plano. Eso implica infraestructura, costos y límites de tiempo de ejecución — los servicios gratuitos (Railway, Render, etc.) cortan procesos que duran más de unos minutos sin actividad.
+
+Esta app corre directamente en tu computadora: el monitoreo es infinito, ininterrumpido y sin costo mientras la tengas abierta. No necesitás cuenta en ningún servicio ni configurar nada externo.
 
 ## Descarga
 
@@ -31,13 +37,12 @@ Monitor de disponibilidad de citas DEKRA Costa Rica. Revisa automáticamente si 
 
 ## Uso
 
-La primera vez que abrís la app, te lleva automáticamente a la pestaña **Mis datos**. Llenás tu nombre, correo, teléfono y placa, guardás, y ya podés usar el monitor.
+La primera vez que abrís la app, te lleva automáticamente a la pestaña **Mis datos**. Llenás tu nombre, correo, teléfono y placa, guardás, y ya podés usarla.
 
-1. Seleccioná la agencia
-2. Elegí el rango de fechas
-3. Configurá el intervalo de revisión
-4. Activá **Auto-agendar** si querés que reserve solo cuando encuentre disponibilidad
-5. Presioná **▶ Iniciar**
+1. Seleccioná una o varias agencias
+2. Elegí el rango de fechas y el intervalo de revisión
+3. Opcionalmente filtrá por rango de horario
+4. Presioná **▶ Iniciar** — la app reserva sola cuando encuentra disponibilidad
 
 ## Alertas por plataforma
 
