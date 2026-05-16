@@ -149,6 +149,7 @@ class Monitor:
             return
         self._stop_event.clear()
         self._previous_days  = set()
+        self._first_check    = True
         self.booking_result  = None
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -171,8 +172,9 @@ class Monitor:
         days = fetch_available_days(self.location_id, self.start_date, self.end_date)
         curr = set(days)
 
-        self.new_days       = sorted(curr - self._previous_days)
+        self.new_days       = [] if self._first_check else sorted(curr - self._previous_days)
         self._previous_days = curr
+        self._first_check   = False
         self.available_days = sorted(days)
         self.last_check     = datetime.now(TZ_CR)
 
