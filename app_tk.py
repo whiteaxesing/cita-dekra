@@ -646,6 +646,32 @@ class App(ctk.CTk):
     def _open_slot_picker(self):
         if not monitor.available_days:
             return
+
+        def run():
+            existing = fetch_booking(
+                self._customer.get("vehicle_rego", ""),
+                self._customer.get("email", ""),
+                self._customer.get("phone", ""),
+            )
+            self.after(0, lambda: self._on_picker_check(existing))
+
+        self.pick_btn.configure(state="disabled", text="Verificando...")
+        Thread(target=run, daemon=True).start()
+
+    def _on_picker_check(self, existing: dict | None):
+        self.pick_btn.configure(state="normal", text="Elegir horario →")
+        if existing:
+            self._set_results(
+                f"⚠️ Ya tenés una cita agendada:\n"
+                f"{'─'*35}\n"
+                f"📅 {format_date(existing['startDateTime'])}\n"
+                f"🏢 {existing.get('locationName', '—')}\n"
+                f"🚗 Placa {existing.get('vehicleRego', '—')}\n"
+                f"{'─'*35}\n"
+                f"Usá la pestaña «Modificar cita» para cambiarla."
+            )
+            self._tabs.set("Modificar cita")
+            return
         hr = self._hour_range(self.time_enabled, self.time_from, self.time_to)
         SlotPickerWindow(self, monitor.location_id, monitor.location_name,
                          monitor.available_days, self._customer, hr,
@@ -756,10 +782,17 @@ class SlotPickerWindow(ctk.CTkToplevel):
             ctk.CTkButton(row, text=label, width=100,
                           command=lambda slot=s: self._book(day, slot)).pack(side="left", padx=4)
 
+    def _set_slots_state(self, state: str):
+        for row in self._slot_scroll.winfo_children():
+            for btn in row.winfo_children():
+                try:
+                    btn.configure(state=state)
+                except Exception:
+                    pass
+
     def _book(self, day: str, slot: dict):
         self._status.configure(text="⏳ Agendando...", text_color="gray")
-        for w in self._slot_scroll.winfo_children():
-            w.configure(state="disabled")
+        self._set_slots_state("disabled")
 
         def run():
             from api import fetch_time_slots, confirm_timeslot, create_booking
@@ -784,10 +817,12 @@ class SlotPickerWindow(ctk.CTkToplevel):
             if self._on_booked:
                 self.after(1500, lambda: (self._on_booked(result, selected), self.destroy()))
         else:
-            self._status.configure(text="❌ No se pudo agendar. Intentá con otro horario.", text_color="red")
-            for w in self._slot_scroll.winfo_children():
-                for btn in w.winfo_children():
-                    btn.configure(state="normal")
+            msg = result.get("message", "") if result else ""
+            if "existed booking" in msg:
+                self._status.configure(text="❌ Ya tenés una cita agendada para esta placa.", text_color="red")
+            else:
+                self._status.configure(text="❌ No se pudo agendar. Intentá con otro horario.", text_color="red")
+            self._set_slots_state("normal")
 
 
 if __name__ == "__main__":
