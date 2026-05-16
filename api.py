@@ -94,11 +94,9 @@ def confirm_timeslot(location_id: str, slot: dict) -> bool:
         url = f"{BASE_URL}/{location_id}/confirm-booking-timeslots"
         r = _session.post(url, json=payload, timeout=10)
         _log("POST", url, payload, r.status_code, r.text)
-        print(f"  [confirm] status={r.status_code} body={r.text[:200]}")
         body = r.json()
         return r.ok and isinstance(body, list) and len(body) > 0
     except Exception as e:
-        print(f"  [confirm] error: {e}")
         return False
 
 
@@ -169,10 +167,8 @@ def create_booking(location_id: str, selected_slot: dict, all_slots: list[dict],
     try:
         r = _session.post(BASE_URL, json=payload, timeout=15)
         _log("POST", BASE_URL, payload, r.status_code, r.text)
-        print(f"  [booking] status={r.status_code} body={r.text[:300]}")
         return r.json()
-    except Exception as e:
-        print(f"  [booking] error: {e}")
+    except Exception:
         return None
 
 
