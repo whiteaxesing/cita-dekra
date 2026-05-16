@@ -9,7 +9,6 @@ from api import (fetch_locations, fetch_available_days, fetch_time_slots,
                  confirm_timeslot, create_booking, release_timeslot,
                  fetch_booking, check_update_allowed, delete_booking)
 from config import PRODUCT_ID
-from tkcalendar import DateEntry
 from monitor import monitor, format_date
 
 TZ_CR = ZoneInfo("America/Costa_Rica")
@@ -84,19 +83,8 @@ class App(ctk.CTk):
 
         return enabled_var, from_var, to_var
 
-    def _date_picker(self, parent, initial: date) -> DateEntry:
-        return DateEntry(
-            parent,
-            date_pattern="yyyy-mm-dd",
-            year=initial.year, month=initial.month, day=initial.day,
-            background="#1f538d", foreground="white",
-            selectbackground="#1f538d", selectforeground="white",
-            headersbackground="#1a1a2e", headersforeground="white",
-            normalbackground="#2b2b2b", normalforeground="white",
-            weekendbackground="#2b2b2b", weekendforeground="#aaa",
-            othermonthbackground="#222", othermonthforeground="#555",
-            bordercolor="#555", font=("Helvetica", 11),
-        )
+    def _date_picker(self, parent, initial: date) -> "DatePicker":
+        return DatePicker(parent, initial)
 
     # ─── Cargar agencias ──────────────────────────────────────────────────────
 
@@ -703,6 +691,34 @@ class App(ctk.CTk):
         self.results_box.delete("1.0", "end")
         self.results_box.insert("1.0", text)
         self.results_box.configure(state="disabled")
+
+
+class DatePicker(ctk.CTkFrame):
+    """Selector de fecha con tres dropdowns: día / mes / año."""
+
+    MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+
+    def __init__(self, parent, initial: date):
+        super().__init__(parent, fg_color="transparent")
+        self._day_var   = ctk.StringVar(value=str(initial.day))
+        self._month_var = ctk.StringVar(value=self.MESES[initial.month - 1])
+        self._year_var  = ctk.StringVar(value=str(initial.year))
+
+        years = [str(y) for y in range(date.today().year, date.today().year + 3)]
+        days  = [str(d) for d in range(1, 32)]
+
+        ctk.CTkOptionMenu(self, variable=self._day_var,   values=days,          width=58).pack(side="left", padx=(0, 2))
+        ctk.CTkOptionMenu(self, variable=self._month_var, values=self.MESES,    width=72).pack(side="left", padx=2)
+        ctk.CTkOptionMenu(self, variable=self._year_var,  values=years,         width=76).pack(side="left", padx=(2, 0))
+
+    def get(self) -> str:
+        try:
+            m = self.MESES.index(self._month_var.get()) + 1
+            d = int(self._day_var.get())
+            y = int(self._year_var.get())
+            return date(y, m, d).strftime("%Y-%m-%d")
+        except (ValueError, IndexError):
+            return date.today().strftime("%Y-%m-%d")
 
 
 class SlotPickerWindow(ctk.CTkToplevel):
