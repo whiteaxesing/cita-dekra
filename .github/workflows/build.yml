@@ -1,0 +1,57 @@
+name: Build ejecutables
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            name: mac
+          - os: windows-latest
+            name: windows
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build Mac
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --windowed \
+            --collect-all customtkinter \
+            --name CitaDEKRA \
+            app_tk.py
+          cd dist && zip -r CitaDEKRA-mac.zip CitaDEKRA.app
+
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --onefile --windowed `
+            --collect-all customtkinter `
+            --name CitaDEKRA `
+            app_tk.py
+
+      - name: Subir al release (Mac)
+        if: runner.os == 'macOS'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/CitaDEKRA-mac.zip
+
+      - name: Subir al release (Windows)
+        if: runner.os == 'Windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/CitaDEKRA.exe
