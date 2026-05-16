@@ -4,10 +4,15 @@ Monitor de disponibilidad de citas DEKRA Costa Rica. Revisa automáticamente si 
 
 ## Descarga
 
-Entrá a [Releases](../../releases/latest) y descargá el archivo de tu sistema operativo:
-
-- **Mac** → `CitaDEKRA-mac.zip`
-- **Windows** → `CitaDEKRA.exe`
+<p>
+  <a href="../../releases/latest/download/CitaDEKRA-mac.zip">
+    <img src="https://img.shields.io/badge/Mac-Descargar-black?style=for-the-badge&logo=apple" alt="Descargar para Mac">
+  </a>
+  &nbsp;
+  <a href="../../releases/latest/download/CitaDEKRA.exe">
+    <img src="https://img.shields.io/badge/Windows-Descargar-0078D4?style=for-the-badge&logo=windows" alt="Descargar para Windows">
+  </a>
+</p>
 
 ## Instalación
 
