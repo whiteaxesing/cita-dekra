@@ -59,20 +59,21 @@ class App(ctk.CTk):
         return result
 
     def _build_time_filter(self, parent, pad) -> tuple[ctk.BooleanVar, ctk.StringVar, ctk.StringVar]:
-        """Retorna (enabled_var, from_var, to_var). El frame de horas se muestra/oculta con el toggle."""
+        """Retorna (enabled_var, from_var, to_var). El frame de horas se muestra/oculta dentro de un contenedor fijo."""
         enabled_var = ctk.BooleanVar(value=False)
         from_var    = ctk.StringVar(value="7:00")
         to_var      = ctk.StringVar(value="17:00")
         hours       = [f"{h}:00" for h in range(5, 20)]
 
-        toggle_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        toggle_frame.pack(fill="x", **pad)
-        ctk.CTkSwitch(toggle_frame, text="🕐 Filtrar por horario", variable=enabled_var,
-                      command=lambda: hour_frame.pack(fill="x", **pad) if enabled_var.get()
-                                      else hour_frame.pack_forget()).pack(side="left")
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.pack(fill="x", **pad)
 
-        hour_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        left  = ctk.CTkFrame(hour_frame, fg_color="transparent")
+        ctk.CTkSwitch(container, text="🕐 Filtrar por horario", variable=enabled_var,
+                      command=lambda: hour_frame.pack(fill="x", pady=(4, 0)) if enabled_var.get()
+                                      else hour_frame.pack_forget()).pack(fill="x")
+
+        hour_frame = ctk.CTkFrame(container, fg_color="transparent")
+        left = ctk.CTkFrame(hour_frame, fg_color="transparent")
         left.pack(side="left", expand=True, fill="x", padx=(0, 5))
         ctk.CTkLabel(left, text="Desde las").pack(anchor="w")
         ctk.CTkOptionMenu(left, variable=from_var, values=hours).pack(fill="x")
@@ -606,7 +607,27 @@ class App(ctk.CTk):
             return
         hr = self._hour_range(self.time_enabled, self.time_from, self.time_to)
         SlotPickerWindow(self, monitor.location_id, monitor.location_name,
-                         monitor.available_days, self._customer, hr)
+                         monitor.available_days, self._customer, hr,
+                         on_booked=self._on_slot_booked)
+
+    def _on_slot_booked(self, result: dict, selected: dict):
+        self._stop()
+        self.pick_btn.configure(state="disabled")
+        items = result.get("bookingResultItems", [])
+        num   = items[0].get("reservationNumber", "?") if items else "?"
+        bid   = items[0].get("bookingId", "?") if items else "?"
+        rego  = self._customer.get("vehicle_rego", "—")
+        self._set_results(
+            f"✅ ¡CITA AGENDADA!\n"
+            f"{'─'*40}\n"
+            f"Número:  {num}\n"
+            f"Fecha:   {format_date(selected['time'])}\n"
+            f"Agencia: {monitor.location_name}\n"
+            f"Placa:   {rego}\n"
+            f"ID:      {bid}\n"
+            f"{'─'*40}\n"
+            f"Revisá tu correo para la confirmación."
+        )
 
     def _set_results(self, text: str):
         self.results_box.configure(state="normal")
@@ -616,7 +637,7 @@ class App(ctk.CTk):
 
 
 class SlotPickerWindow(ctk.CTkToplevel):
-    def __init__(self, parent, location_id, location_name, available_days, customer, hour_range):
+    def __init__(self, parent, location_id, location_name, available_days, customer, hour_range, on_booked=None):
         super().__init__(parent)
         self.title("Elegir horario")
         self.geometry("520x560")
@@ -628,6 +649,7 @@ class SlotPickerWindow(ctk.CTkToplevel):
         self._days          = available_days
         self._customer      = customer
         self._hour_range    = hour_range
+        self._on_booked     = on_booked
         self._selected_day  = None
 
         ctk.CTkLabel(self, text=f"📅 {location_name}",
@@ -716,12 +738,15 @@ class SlotPickerWindow(ctk.CTkToplevel):
                 text=f"✅ ¡Reservado! Número: {num}  ·  {format_date(selected['time'])}",
                 text_color="lightgreen"
             )
-            trigger_booked_alert = __import__("monitor").trigger_booked_alert
-            trigger_booked_alert(self._location_name, selected["time"], num, 1)
+            import monitor as _mon
+            _mon.trigger_booked_alert(self._location_name, selected["time"], num, 1)
+            if self._on_booked:
+                self.after(1500, lambda: (self._on_booked(result, selected), self.destroy()))
         else:
             self._status.configure(text="❌ No se pudo agendar. Intentá con otro horario.", text_color="red")
             for w in self._slot_scroll.winfo_children():
-                w.configure(state="normal")
+                for btn in w.winfo_children():
+                    btn.configure(state="normal")
 
 
 if __name__ == "__main__":
