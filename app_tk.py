@@ -240,9 +240,14 @@ class App(ctk.CTk):
 
         self.mod_time_enabled, self.mod_time_from, self.mod_time_to = self._build_time_filter(tab, pad)
 
-        self.mod_btn = ctk.CTkButton(tab, text="🔄 Modificar a primer slot disponible",
+        action_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        action_frame.pack(fill="x", padx=16, pady=10)
+        self.mod_btn = ctk.CTkButton(action_frame, text="🔄 Modificar",
                                       command=self._modificar_cita, fg_color="#1a6aa0", state="disabled")
-        self.mod_btn.pack(fill="x", padx=16, pady=10)
+        self.mod_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
+        self.cancel_btn = ctk.CTkButton(action_frame, text="🗑 Cancelar cita",
+                                         command=self._cancelar_cita, fg_color="#8b1a1a", state="disabled")
+        self.cancel_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
         self.mod_status = ctk.CTkTextbox(tab, height=140, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
         self.mod_status.pack(fill="both", expand=True, padx=16, pady=(0, 8))
@@ -271,6 +276,7 @@ class App(ctk.CTk):
                 self._set_mod_status("Sin cita activa para tus datos.")
                 self._current_booking = None
                 self.mod_btn.configure(state="disabled")
+                self.cancel_btn.configure(state="disabled")
                 return
 
             self._current_booking = b
@@ -279,8 +285,47 @@ class App(ctk.CTk):
             self.mod_card_placa.configure(text=f"🚗  Placa {b.get('vehicleRego', '—')}", text_color="#aac4e0")
             self._set_mod_status("Cita encontrada. Elegí la nueva agencia y fechas, y presioná «Modificar».")
             self.mod_btn.configure(state="normal")
+            self.cancel_btn.configure(state="normal")
 
         Thread(target=run, daemon=True).start()
+
+    def _cancelar_cita(self):
+        if not self._current_booking:
+            return
+        b = self._current_booking
+        self.mod_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="disabled", text="Cancelando...")
+        self._set_mod_status("⏳ Cancelando cita...")
+
+        def run():
+            book_id    = b["id"]
+            loc_id     = b.get("locationId", b.get("locationid", b.get("locationID", "")))
+            old_slot   = {
+                "time":            b["startDateTime"],
+                "resourceIds":     b.get("resourceIds", []),
+                "locationId":      loc_id,
+                "productDuration": 5,
+                "productId":       PRODUCT_ID,
+                "productIndex":    0,
+                "productName":     b.get("productName", "AUTOMÓVIL"),
+            }
+            release_timeslot(loc_id, old_slot)
+            ok = delete_booking(book_id)
+            self.after(0, lambda: self._on_cancelled(ok))
+
+        Thread(target=run, daemon=True).start()
+
+    def _on_cancelled(self, ok: bool):
+        if ok:
+            self._current_booking = None
+            self.mod_card_fecha.configure(text="📅  —", text_color="gray")
+            self.mod_card_agencia.configure(text="🏢  —", text_color="gray")
+            self.mod_card_placa.configure(text="🚗  —", text_color="gray")
+            self._set_mod_status("✅ Cita cancelada. Revisá tu correo para la confirmación.")
+        else:
+            self._set_mod_status("❌ No se pudo cancelar. Intentalo de nuevo o hacelo desde la web de DEKRA.")
+            self.mod_btn.configure(state="normal")
+        self.cancel_btn.configure(state="disabled" if ok else "normal", text="🗑 Cancelar cita")
 
     def _modificar_cita(self):
         if not self._current_booking:
