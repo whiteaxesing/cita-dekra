@@ -147,13 +147,22 @@ class App(ctk.CTk):
         ctk.CTkLabel(tab, text="Modificar cita existente", font=ctk.CTkFont(size=15, weight="bold"), anchor="w").pack(fill="x", **pad)
         ctk.CTkLabel(tab, text="Buscá tu cita y agendala en otro horario disponible.", text_color="gray", anchor="w").pack(fill="x", padx=16)
 
-        # Cita actual
-        ctk.CTkLabel(tab, text="Cita actual", font=ctk.CTkFont(weight="bold"), anchor="w").pack(fill="x", padx=16, pady=(16, 2))
-        self.mod_current = ctk.CTkLabel(tab, text="Presioná «Buscar» para cargar tu cita.", text_color="gray", anchor="w", wraplength=600)
-        self.mod_current.pack(fill="x", padx=16)
+        # ── Tarjeta cita actual ──
+        self.mod_card = ctk.CTkFrame(tab, fg_color="#1e2a38", corner_radius=10)
+        self.mod_card.pack(fill="x", padx=16, pady=(12, 4))
+
+        card_inner = ctk.CTkFrame(self.mod_card, fg_color="transparent")
+        card_inner.pack(fill="x", padx=16, pady=12)
+
+        self.mod_card_fecha   = ctk.CTkLabel(card_inner, text="📅  —", anchor="w", font=ctk.CTkFont(size=13))
+        self.mod_card_agencia = ctk.CTkLabel(card_inner, text="🏢  —", anchor="w", text_color="gray")
+        self.mod_card_placa   = ctk.CTkLabel(card_inner, text="🚗  —", anchor="w", text_color="gray")
+        self.mod_card_fecha.pack(fill="x")
+        self.mod_card_agencia.pack(fill="x")
+        self.mod_card_placa.pack(fill="x")
 
         ctk.CTkButton(tab, text="🔍 Buscar mi cita", command=self._buscar_cita, fg_color="#444").pack(
-            fill="x", padx=16, pady=8)
+            fill="x", padx=16, pady=(6, 8))
 
         ctk.CTkLabel(tab, text="Nueva agencia", anchor="w").pack(fill="x", **pad)
         self.mod_loc_var = ctk.StringVar(value=sorted(self._locations.keys())[0] if self._locations else "")
@@ -199,19 +208,19 @@ class App(ctk.CTk):
             c = self._customer
             b = fetch_booking(c.get("vehicle_rego", ""), c.get("email", ""), c.get("phone", ""))
             if not b:
-                self.mod_current.configure(text="No se encontró ninguna cita activa para tus datos.", text_color="gray")
-                self._set_mod_status("Sin cita activa.")
+                self.mod_card_fecha.configure(text="📅  Sin cita activa encontrada.", text_color="gray")
+                self.mod_card_agencia.configure(text="🏢  —", text_color="gray")
+                self.mod_card_placa.configure(text="🚗  —", text_color="gray")
+                self._set_mod_status("Sin cita activa para tus datos.")
                 self._current_booking = None
                 self.mod_btn.configure(state="disabled")
                 return
 
             self._current_booking = b
-            slot_cr = format_date(b["startDateTime"])
-            self.mod_current.configure(
-                text=f"📅 {slot_cr}  |  {b.get('locationName', '—')}  |  Placa {b.get('vehicleRego', '—')}",
-                text_color="white"
-            )
-            self._set_mod_status(f"Cita encontrada. ID: {b.get('id', '?')}\nPresioná «Modificar» para cambiarla.")
+            self.mod_card_fecha.configure(text=f"📅  {format_date(b['startDateTime'])}", text_color="white")
+            self.mod_card_agencia.configure(text=f"🏢  {b.get('locationName', '—')}", text_color="#aac4e0")
+            self.mod_card_placa.configure(text=f"🚗  Placa {b.get('vehicleRego', '—')}", text_color="#aac4e0")
+            self._set_mod_status("Cita encontrada. Elegí la nueva agencia y fechas, y presioná «Modificar».")
             self.mod_btn.configure(state="normal")
 
         Thread(target=run, daemon=True).start()
