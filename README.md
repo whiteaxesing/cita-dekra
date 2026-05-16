@@ -2,44 +2,31 @@
 
 Monitor de disponibilidad de citas DEKRA Costa Rica. Revisa automáticamente si hay espacio disponible en la agencia que elijas y te avisa con sonido y voz en cuanto aparezca algo. Si querés, puede agendar la cita por vos automáticamente.
 
-## Requisitos
+## Descarga
 
-- Python 3.11+
+Entrá a [Releases](../../releases/latest) y descargá el archivo de tu sistema operativo:
+
+- **Mac** → `CitaDEKRA-mac.zip`
+- **Windows** → `CitaDEKRA.exe`
 
 ## Instalación
 
-```bash
-pip install -r requirements.txt
-```
+**Mac:**
+1. Descomprimí el `.zip`
+2. Abrí la Terminal y ejecutá:
+   ```bash
+   xattr -cr ~/Downloads/CitaDEKRA.app
+   ```
+3. Doble clic en `CitaDEKRA.app`
 
-> **macOS:** si ves `No module named '_tkinter'`, instalá el soporte con `brew install python-tk`.
+> Este paso es necesario porque la app no está firmada con un certificado de Apple. No afecta su funcionamiento.
 
-## Configurar tus datos
-
-Antes de correr la app, copiá el archivo de ejemplo y llenalo con tus datos:
-
-```bash
-cp customer.example.py customer.py
-```
-
-Editá `customer.py`:
-
-```python
-FIRST_NAME    = "Juan"
-LAST_NAME     = "Pérez González"
-EMAIL         = "juan@example.com"
-PHONE         = "88881234"
-COUNTRY_CODE  = "+506"
-VEHICLE_REGO  = "ABC123"   # número de placa sin guión
-```
-
-`customer.py` está en `.gitignore` — tus datos nunca se suben al repo.
+**Windows:**
+1. Doble clic en `CitaDEKRA.exe`
 
 ## Uso
 
-```bash
-python3 app_tk.py
-```
+La primera vez que abrís la app, te lleva automáticamente a la pestaña **Mis datos**. Llenás tu nombre, correo, teléfono y placa, guardás, y ya podés usar el monitor.
 
 1. Seleccioná la agencia
 2. Elegí el rango de fechas
@@ -47,10 +34,9 @@ python3 app_tk.py
 4. Activá **Auto-agendar** si querés que reserve solo cuando encuentre disponibilidad
 5. Presioná **▶ Iniciar**
 
-## Plataformas
+## Alertas por plataforma
 
 | OS | Alerta |
 |----|--------|
 | macOS | Sonido Glass + voz Paulina |
 | Windows | Notificación del sistema |
-| Linux | `notify-send` |
