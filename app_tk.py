@@ -328,7 +328,6 @@ class App(ctk.CTk):
             ("Apellidos",           "last_name",    c.get("last_name",    "")),
             ("Correo electrónico",  "email",        c.get("email",        "")),
             ("Teléfono",            "phone",        c.get("phone",        "")),
-            ("Código de país",      "country_code", c.get("country_code", "+506")),
             ("Número de placa",     "vehicle_rego", c.get("vehicle_rego", "")),
         ]
 
@@ -362,6 +361,7 @@ class App(ctk.CTk):
 
     def _save_customer(self):
         data = {key: entry.get().strip() for key, entry in self._field_entries.items()}
+        data["country_code"] = "+506"
         if not data.get("email") or not data.get("vehicle_rego"):
             self.save_status.configure(text="❌ Correo y placa son obligatorios.", text_color="red")
             return
