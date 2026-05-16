@@ -34,7 +34,8 @@ def fetch_locations() -> list[dict]:
         return []
 
 
-def fetch_available_days(location_id: str, start: datetime, end: datetime) -> list[str]:
+def fetch_available_days(location_id: str, start: datetime, end: datetime) -> list[str] | None:
+    """Devuelve lista de días disponibles, o None si hay error de conexión."""
     params = {
         "startDate":             start.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "endDate":               end.strftime("%Y-%m-%dT%H:%M:%S.999Z"),
@@ -48,7 +49,7 @@ def fetch_available_days(location_id: str, start: datetime, end: datetime) -> li
         r.raise_for_status()
         return [d["date"] for d in r.json() if d.get("isAvailable")]
     except Exception:
-        return []
+        return None
 
 
 def fetch_time_slots(location_id: str, day_date: str, selected_slot: dict | None = None) -> list[dict]:

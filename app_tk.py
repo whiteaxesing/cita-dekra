@@ -333,6 +333,12 @@ class App(ctk.CTk):
             days = fetch_available_days(new_loc_id,
                                         start_dt.replace(tzinfo=timezone.utc),
                                         end_dt.replace(tzinfo=timezone.utc))
+            if days is None:
+                self.after(0, lambda: self._set_mod_status(
+                    f"⚠️ Sin conexión — reintentando en {int(self.interval_var.get())} min."
+                ))
+                self._automod_stop.wait(timeout=int(self.interval_var.get()) * 60)
+                continue
             if days:
                 for day in days:
                     if self._automod_stop.is_set():
@@ -467,6 +473,10 @@ class App(ctk.CTk):
 
             self._set_mod_status("⏳ Buscando slots disponibles en nueva agencia...")
             days = fetch_available_days(new_loc_id, start_dt.replace(tzinfo=timezone.utc), end_dt.replace(tzinfo=timezone.utc))
+            if days is None:
+                self._set_mod_status("⚠️ Sin conexión. Verificá tu internet e intentá de nuevo.")
+                self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
+                return
             if not days:
                 self._set_mod_status(f"❌ Sin disponibilidad en {new_loc_name} para ese rango.")
                 self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
@@ -712,10 +722,16 @@ class App(ctk.CTk):
         if monitor.running:
             mode = "🤖 Auto-agendando" if monitor.auto_book_enabled else "👁 Monitoreando"
             last = monitor.last_check.strftime("%H:%M:%S") if monitor.last_check else "..."
-            self.status_label.configure(
-                text=f"{mode} {monitor.location_name} · última revisión: {last}",
-                text_color="lightgreen"
-            )
+            if monitor.connection_error:
+                self.status_label.configure(
+                    text=f"⚠️ Sin conexión · reintentando en {monitor.interval_min} min.",
+                    text_color="orange"
+                )
+            else:
+                self.status_label.configure(
+                    text=f"{mode} {monitor.location_name} · última revisión: {last}",
+                    text_color="lightgreen"
+                )
 
             if monitor.booking_result:
                 r    = monitor.booking_result

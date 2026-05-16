@@ -110,8 +110,9 @@ class Monitor:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        self.running         = False
-        self.last_check      = None
+        self.running          = False
+        self.last_check       = None
+        self.connection_error = False
         self.available_days: list[str] = []
         self.new_days:       list[str] = []
         self._previous_days: set[str]  = set()
@@ -170,13 +171,19 @@ class Monitor:
 
     def _check(self):
         days = fetch_available_days(self.location_id, self.start_date, self.end_date)
+        self.last_check = datetime.now(TZ_CR)
+
+        if days is None:
+            self.connection_error = True
+            return
+
+        self.connection_error = False
         curr = set(days)
 
         self.new_days       = [] if self._first_check else sorted(curr - self._previous_days)
         self._previous_days = curr
         self._first_check   = False
         self.available_days = sorted(days)
-        self.last_check     = datetime.now(TZ_CR)
 
         if days and self.sound_enabled and not self.auto_book_enabled:
             trigger_alert(self.location_name, self.sound_times)
