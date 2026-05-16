@@ -410,7 +410,9 @@ class App(ctk.CTk):
                 num   = items[0].get("reservationNumber", "?") if items else "?"
                 self._current_booking = None
                 self.mod_btn.configure(state="disabled", text="🔄 Modificar a primer slot disponible")
-                self.mod_current.configure(text="Cita modificada exitosamente.", text_color="lightgreen")
+                self.mod_card_fecha.configure(text="📅  Cita modificada exitosamente.", text_color="lightgreen")
+                self.mod_card_agencia.configure(text="", text_color="gray")
+                self.mod_card_placa.configure(text="", text_color="gray")
                 self._set_mod_status(
                     f"✅ ¡CITA MODIFICADA!\n"
                     f"{'─'*35}\n"
