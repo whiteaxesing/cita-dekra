@@ -101,26 +101,53 @@ class App(ctk.CTk):
 
         self._tabs = ctk.CTkTabview(self)
         self._tabs.pack(fill="both", expand=True, padx=20, pady=(0, 16))
-        self._tabs.add("Monitor")
+        self._tabs.add("Agendador")
         self._tabs.add("Modificar cita")
         self._tabs.add("Mis datos")
 
-        self._build_monitor_tab(self._tabs.tab("Monitor"))
+        self._build_monitor_tab(self._tabs.tab("Agendador"))
         self._build_modificar_tab(self._tabs.tab("Modificar cita"))
         self._build_datos_tab(self._tabs.tab("Mis datos"))
 
     def _build_monitor_tab(self, tab):
-        pad  = {"padx": 16, "pady": 6}
+        pad  = {"padx": 16, "pady": 5}
         padx = {"padx": 16}
 
-        # ── Agencia ──
-        ctk.CTkLabel(tab, text="Agencia", anchor="w").pack(fill="x", **pad)
-        self.loc_var = ctk.StringVar(value=sorted(self._locations.keys())[0] if self._locations else "")
-        self.loc_menu = ctk.CTkOptionMenu(tab, variable=self.loc_var, values=sorted(self._locations.keys()))
-        self.loc_menu.pack(fill="x", **pad)
+        # ── Controles ──
+        ctrl = ctk.CTkFrame(tab, fg_color="transparent")
+        ctrl.pack(fill="x")
+
+        # ── Resultados (toma el espacio restante) ──
+        results_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        results_frame.pack(fill="both", expand=True, padx=16, pady=(4, 8))
+        self.status_label = ctk.CTkLabel(results_frame, text="Monitor detenido.", text_color="gray", anchor="w")
+        self.status_label.pack(fill="x")
+        ctk.CTkLabel(results_frame, text="📅 Resultados", font=ctk.CTkFont(size=13, weight="bold"), anchor="w").pack(fill="x")
+        self.results_box = ctk.CTkTextbox(results_frame, height=140, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
+        self.results_box.pack(fill="x")
+
+        # ── Agencias (dropdown multi-selección) ──
+        ctk.CTkLabel(ctrl, text="Agencias a monitorear", anchor="w").pack(fill="x", **pad)
+        self._loc_check_vars: dict[str, ctk.BooleanVar] = {}
+        self._loc_checkboxes: dict[str, ctk.CTkCheckBox] = {}
+        for name in sorted(self._locations.keys()):
+            self._loc_check_vars[name] = ctk.BooleanVar(value=False)
+        self._loc_dropdown_btn = ctk.CTkButton(
+            ctrl, text="Ninguna seleccionada", anchor="w",
+            fg_color="#2b2b2b", hover_color="#3a3a3a", text_color="white",
+            command=self._toggle_loc_dropdown
+        )
+        self._loc_dropdown_btn.pack(fill="x", padx=16, pady=(0, 0))
+        self._loc_dropdown_frame = ctk.CTkScrollableFrame(ctrl, fg_color="#1e1e1e", corner_radius=6, height=160)
+        for name, var in self._loc_check_vars.items():
+            cb = ctk.CTkCheckBox(self._loc_dropdown_frame, text=name, variable=var,
+                                 command=self._update_loc_btn_text)
+            cb.pack(anchor="w", padx=12, pady=3)
+            self._loc_checkboxes[name] = cb
+        self._loc_dropdown_open = False
 
         # ── Fechas ──
-        date_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        date_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
         date_frame.pack(fill="x", **pad)
         left = ctk.CTkFrame(date_frame, fg_color="transparent")
         left.pack(side="left", expand=True, fill="x", padx=(0, 5))
@@ -134,12 +161,12 @@ class App(ctk.CTk):
         self.end_entry.pack(fill="x")
 
         # ── Filtro de horario ──
-        self.time_enabled, self.time_from, self.time_to = self._build_time_filter(tab, pad)
+        self.time_enabled, self.time_from, self.time_to = self._build_time_filter(ctrl, pad)
 
         # ── Intervalo ──
-        ctk.CTkLabel(tab, text="Revisar cada (minutos)", anchor="w").pack(fill="x", **pad)
+        ctk.CTkLabel(ctrl, text="Revisar cada (minutos)", anchor="w").pack(fill="x", **pad)
         self.interval_var = ctk.IntVar(value=5)
-        interval_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        interval_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
         interval_frame.pack(fill="x", **pad)
         self.interval_slider = ctk.CTkSlider(interval_frame, from_=1, to=30, variable=self.interval_var,
                                               command=lambda v: self.interval_label.configure(text=f"{int(v)} min"))
@@ -148,49 +175,37 @@ class App(ctk.CTk):
         self.interval_label.pack(side="right")
 
         # ── Sonido ──
-        sound_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        sound_frame.pack(fill="x", **pad)
         self.sound_var = ctk.BooleanVar(value=True)
-        ctk.CTkSwitch(sound_frame, text="🔊 Sonido al encontrar cita", variable=self.sound_var).pack(side="left")
-
-        # ── Auto-booking ──
-        self.autobook_var = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(tab, text="🤖 Auto-agendar cuando encuentre cita",
-                      variable=self.autobook_var).pack(fill="x", **pad)
-        self.customer_label = ctk.CTkLabel(tab, text=self._customer_summary(), text_color="gray", anchor="w")
+        ctk.CTkSwitch(ctrl, text="🔊 Sonido al encontrar cita", variable=self.sound_var).pack(fill="x", **pad)
+        self.autobook_var = ctk.BooleanVar(value=True)  # siempre activo
+        self.customer_label = ctk.CTkLabel(ctrl, text=self._customer_summary(), text_color="gray", anchor="w")
         self.customer_label.pack(fill="x", padx=16)
 
         # ── Botones ──
-        btn_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        btn_frame.pack(fill="x", **padx, pady=12)
+        btn_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
+        btn_frame.pack(fill="x", **padx, pady=10)
         self.start_btn = ctk.CTkButton(btn_frame, text="▶ Iniciar", command=self._start, fg_color="green")
         self.start_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
         self.stop_btn = ctk.CTkButton(btn_frame, text="⏹ Detener", command=self._stop,
                                        fg_color="gray", state="disabled")
         self.stop_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
-        # ── Estado ──
-        self.status_label = ctk.CTkLabel(tab, text="Monitor detenido.", text_color="gray")
-        self.status_label.pack(**pad)
-
-        # ── Resultados ──
-        results_header = ctk.CTkFrame(tab, fg_color="transparent")
-        results_header.pack(fill="x", **pad)
-        ctk.CTkLabel(results_header, text="📅 Resultados", font=ctk.CTkFont(size=14, weight="bold"), anchor="w").pack(side="left")
-        self.pick_btn = ctk.CTkButton(results_header, text="Elegir horario →", width=130,
-                                      command=self._open_slot_picker, fg_color="#1a6aa0", state="disabled")
-        self.pick_btn.pack(side="right")
-        self.results_box = ctk.CTkTextbox(tab, height=200, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
-        self.results_box.pack(fill="both", expand=True, **pad)
-
     def _build_modificar_tab(self, tab):
         pad = {"padx": 16, "pady": 6}
 
-        ctk.CTkLabel(tab, text="Modificar cita existente", font=ctk.CTkFont(size=15, weight="bold"), anchor="w").pack(fill="x", **pad)
-        ctk.CTkLabel(tab, text="Buscá tu cita y agendala en otro horario disponible.", text_color="gray", anchor="w").pack(fill="x", padx=16)
+        # ── Estado (fijo abajo) ──
+        self.mod_status = ctk.CTkTextbox(tab, height=110, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
+        self.mod_status.pack(side="bottom", fill="x", padx=16, pady=(0, 8))
+
+        # ── Controles (scroll) ──
+        ctrl = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        ctrl.pack(side="top", fill="both", expand=True)
+
+        ctk.CTkLabel(ctrl, text="Modificar cita existente", font=ctk.CTkFont(size=15, weight="bold"), anchor="w").pack(fill="x", **pad)
+        ctk.CTkLabel(ctrl, text="Buscá tu cita y agendala en otro horario disponible.", text_color="gray", anchor="w").pack(fill="x", padx=16)
 
         # ── Tarjeta cita actual ──
-        self.mod_card = ctk.CTkFrame(tab, fg_color="#1e2a38", corner_radius=10)
+        self.mod_card = ctk.CTkFrame(ctrl, fg_color="#1e2a38", corner_radius=10)
         self.mod_card.pack(fill="x", padx=16, pady=(12, 4))
 
         card_inner = ctk.CTkFrame(self.mod_card, fg_color="transparent")
@@ -203,14 +218,14 @@ class App(ctk.CTk):
         self.mod_card_agencia.pack(fill="x")
         self.mod_card_placa.pack(fill="x")
 
-        ctk.CTkButton(tab, text="🔍 Buscar mi cita", command=self._buscar_cita, fg_color="#444").pack(
+        ctk.CTkButton(ctrl, text="🔍 Buscar mi cita", command=self._buscar_cita, fg_color="#444").pack(
             fill="x", padx=16, pady=(6, 8))
 
-        ctk.CTkLabel(tab, text="Nueva agencia", anchor="w").pack(fill="x", **pad)
+        ctk.CTkLabel(ctrl, text="Nueva agencia", anchor="w").pack(fill="x", **pad)
         self.mod_loc_var = ctk.StringVar(value=sorted(self._locations.keys())[0] if self._locations else "")
-        ctk.CTkOptionMenu(tab, variable=self.mod_loc_var, values=sorted(self._locations.keys())).pack(fill="x", **pad)
+        ctk.CTkOptionMenu(ctrl, variable=self.mod_loc_var, values=sorted(self._locations.keys())).pack(fill="x", **pad)
 
-        date_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        date_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
         date_frame.pack(fill="x", **pad)
         left = ctk.CTkFrame(date_frame, fg_color="transparent")
         left.pack(side="left", expand=True, fill="x", padx=(0, 5))
@@ -223,22 +238,29 @@ class App(ctk.CTk):
         self.mod_end = self._date_picker(right, date.today() + timedelta(days=30))
         self.mod_end.pack(fill="x")
 
-        self.mod_time_enabled, self.mod_time_from, self.mod_time_to = self._build_time_filter(tab, pad)
+        self.mod_time_enabled, self.mod_time_from, self.mod_time_to = self._build_time_filter(ctrl, pad)
 
-        action_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        action_frame.pack(fill="x", padx=16, pady=10)
-        self.mod_btn = ctk.CTkButton(action_frame, text="🔄 Modificar",
-                                      command=self._modificar_cita, fg_color="#1a6aa0", state="disabled")
-        self.mod_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
-        self.cancel_btn = ctk.CTkButton(action_frame, text="🗑 Cancelar cita",
+        # ── Intervalo ──
+        ctk.CTkLabel(ctrl, text="Revisar cada (minutos)", anchor="w").pack(fill="x", **pad)
+        self.mod_interval_var = ctk.IntVar(value=5)
+        mod_interval_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
+        mod_interval_frame.pack(fill="x", **pad)
+        mod_interval_slider = ctk.CTkSlider(mod_interval_frame, from_=1, to=30,
+                                            variable=self.mod_interval_var,
+                                            command=lambda v: mod_interval_label.configure(text=f"{int(v)} min"))
+        mod_interval_slider.pack(side="left", expand=True, fill="x")
+        mod_interval_label = ctk.CTkLabel(mod_interval_frame, text="5 min", width=50)
+        mod_interval_label.pack(side="right")
+
+        self.cancel_btn = ctk.CTkButton(ctrl, text="🗑 Cancelar cita",
                                          command=self._cancelar_cita, fg_color="#8b1a1a", state="disabled")
-        self.cancel_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
+        self.cancel_btn.pack(fill="x", padx=16, pady=(0, 4))
 
         # ── Auto-modificar ──
-        ctk.CTkLabel(tab, text="Monitoreo automático", font=ctk.CTkFont(weight="bold"), anchor="w").pack(fill="x", padx=16, pady=(8, 2))
-        ctk.CTkLabel(tab, text="Busca un slot disponible y modifica tu cita automáticamente.", text_color="gray", anchor="w").pack(fill="x", padx=16)
+        ctk.CTkLabel(ctrl, text="Monitoreo automático", font=ctk.CTkFont(weight="bold"), anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+        ctk.CTkLabel(ctrl, text="Busca un slot disponible y modifica tu cita automáticamente.", text_color="gray", anchor="w").pack(fill="x", padx=16)
 
-        auto_btn_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        auto_btn_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
         auto_btn_frame.pack(fill="x", padx=16, pady=6)
         self.automod_start_btn = ctk.CTkButton(auto_btn_frame, text="▶ Iniciar búsqueda",
                                                 command=self._start_automod, fg_color="green", state="disabled")
@@ -246,9 +268,6 @@ class App(ctk.CTk):
         self.automod_stop_btn = ctk.CTkButton(auto_btn_frame, text="⏹ Detener",
                                                command=self._stop_automod, fg_color="gray", state="disabled")
         self.automod_stop_btn.pack(side="right", expand=True, fill="x", padx=(5, 0))
-
-        self.mod_status = ctk.CTkTextbox(tab, height=110, state="disabled", font=ctk.CTkFont(family="Courier", size=12))
-        self.mod_status.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
         self._current_booking: dict | None = None
         self._automod_thread: Thread | None = None
@@ -275,7 +294,6 @@ class App(ctk.CTk):
                 self.mod_card_placa.configure(text="🚗  —", text_color="gray")
                 self._set_mod_status("Sin cita activa para tus datos.")
                 self._current_booking = None
-                self.mod_btn.configure(state="disabled")
                 self.cancel_btn.configure(state="disabled")
                 self.automod_start_btn.configure(state="disabled")
                 return
@@ -285,7 +303,6 @@ class App(ctk.CTk):
             self.mod_card_agencia.configure(text=f"🏢  {b.get('locationName', '—')}", text_color="#aac4e0")
             self.mod_card_placa.configure(text=f"🚗  Placa {b.get('vehicleRego', '—')}", text_color="#aac4e0")
             self._set_mod_status("Cita encontrada. Elegí la nueva agencia y fechas, y presioná «Modificar» o «Iniciar búsqueda».")
-            self.mod_btn.configure(state="normal")
             self.cancel_btn.configure(state="normal")
             self.automod_start_btn.configure(state="normal")
 
@@ -303,7 +320,6 @@ class App(ctk.CTk):
 
         self.automod_start_btn.configure(state="disabled")
         self.automod_stop_btn.configure(state="normal")
-        self.mod_btn.configure(state="disabled")
         self.cancel_btn.configure(state="disabled")
 
         self._automod_stop.clear()
@@ -315,12 +331,11 @@ class App(ctk.CTk):
         self._automod_stop.set()
         self.automod_start_btn.configure(state="normal")
         self.automod_stop_btn.configure(state="disabled")
-        self.mod_btn.configure(state="normal")
         self.cancel_btn.configure(state="normal")
         self._set_mod_status("Búsqueda automática detenida.")
 
     def _automod_loop(self, start_dt: datetime, end_dt: datetime):
-        interval = int(self.interval_var.get()) * 60
+        interval = int(self.mod_interval_var.get()) * 60
         new_loc_name = self.mod_loc_var.get()
         new_loc_id   = self._locations.get(new_loc_name, "")
         hr = self._hour_range(self.mod_time_enabled, self.mod_time_from, self.mod_time_to)
@@ -328,16 +343,16 @@ class App(ctk.CTk):
         while not self._automod_stop.is_set():
             self.after(0, lambda: self._set_mod_status(
                 f"⏳ Buscando en {new_loc_name}...\n"
-                f"Revisando cada {int(self.interval_var.get())} min."
+                f"Revisando cada {int(self.mod_interval_var.get())} min."
             ))
             days = fetch_available_days(new_loc_id,
                                         start_dt.replace(tzinfo=timezone.utc),
                                         end_dt.replace(tzinfo=timezone.utc))
             if days is None:
                 self.after(0, lambda: self._set_mod_status(
-                    f"⚠️ Sin conexión — reintentando en {int(self.interval_var.get())} min."
+                    f"⚠️ Sin conexión — reintentando en {int(self.mod_interval_var.get())} min."
                 ))
-                self._automod_stop.wait(timeout=int(self.interval_var.get()) * 60)
+                self._automod_stop.wait(timeout=int(self.mod_interval_var.get()) * 60)
                 continue
             if days:
                 for day in days:
@@ -380,7 +395,6 @@ class App(ctk.CTk):
         self._current_booking = None
         self.automod_start_btn.configure(state="disabled")
         self.automod_stop_btn.configure(state="disabled")
-        self.mod_btn.configure(state="disabled")
         self.cancel_btn.configure(state="disabled")
         self.mod_card_fecha.configure(text=f"📅  {format_date(selected['time'])}", text_color="lightgreen")
         self.mod_card_agencia.configure(text=f"🏢  {loc_name}", text_color="#aac4e0")
@@ -400,8 +414,15 @@ class App(ctk.CTk):
     def _cancelar_cita(self):
         if not self._current_booking:
             return
+        from tkinter import messagebox
         b = self._current_booking
-        self.mod_btn.configure(state="disabled")
+        fecha = format_date(b.get("startDateTime", ""))
+        if not messagebox.askyesno(
+            "Confirmar cancelación",
+            f"¿Seguro que querés cancelar esta cita?\n\n{fecha}\n{b.get('locationName', '')}",
+            icon="warning"
+        ):
+            return
         self.cancel_btn.configure(state="disabled", text="Cancelando...")
         self._set_mod_status("⏳ Cancelando cita...")
 
@@ -432,7 +453,6 @@ class App(ctk.CTk):
             self._set_mod_status("✅ Cita cancelada. Revisá tu correo para la confirmación.")
         else:
             self._set_mod_status("❌ No se pudo cancelar. Intentalo de nuevo o hacelo desde la web de DEKRA.")
-            self.mod_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled" if ok else "normal", text="🗑 Cancelar cita")
 
     def _modificar_cita(self):
@@ -449,7 +469,6 @@ class App(ctk.CTk):
             self._set_mod_status("❌ Fechas inválidas. Formato: YYYY-MM-DD")
             return
 
-        self.mod_btn.configure(state="disabled", text="Modificando...")
         self._set_mod_status("⏳ Verificando que se puede modificar...")
 
         def run():
@@ -465,7 +484,6 @@ class App(ctk.CTk):
 
             if not check_update_allowed(book_id):
                 self._set_mod_status("❌ Esta cita no se puede modificar (muy cerca de la fecha o ya expiró).")
-                self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
                 return
 
             new_loc_name = self.mod_loc_var.get()
@@ -475,11 +493,9 @@ class App(ctk.CTk):
             days = fetch_available_days(new_loc_id, start_dt.replace(tzinfo=timezone.utc), end_dt.replace(tzinfo=timezone.utc))
             if days is None:
                 self._set_mod_status("⚠️ Sin conexión. Verificá tu internet e intentá de nuevo.")
-                self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
                 return
             if not days:
                 self._set_mod_status(f"❌ Sin disponibilidad en {new_loc_name} para ese rango.")
-                self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
                 return
 
             hr     = self._hour_range(self.mod_time_enabled, self.mod_time_from, self.mod_time_to)
@@ -516,7 +532,6 @@ class App(ctk.CTk):
                     else:
                         # Si falla el nuevo booking, informar — la cita vieja ya fue cancelada
                         self._set_mod_status("⚠️ La cita anterior fue cancelada pero el nuevo booking falló.\nIntentá agendar manualmente en la web de DEKRA.")
-                        self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
                         return
                 if result and result.get("isSuccess"):
                     break
@@ -525,7 +540,6 @@ class App(ctk.CTk):
                 items = result.get("bookingResultItems", [])
                 num   = items[0].get("reservationNumber", "?") if items else "?"
                 self._current_booking = None
-                self.mod_btn.configure(state="disabled", text="🔄 Modificar a primer slot disponible")
                 self.mod_card_fecha.configure(text="📅  Cita modificada exitosamente.", text_color="lightgreen")
                 self.mod_card_agencia.configure(text="", text_color="gray")
                 self.mod_card_placa.configure(text="", text_color="gray")
@@ -540,7 +554,6 @@ class App(ctk.CTk):
                 )
             else:
                 self._set_mod_status(f"❌ No se pudo modificar.\nRespuesta: {result}")
-                self.mod_btn.configure(state="normal", text="🔄 Modificar a primer slot disponible")
 
         Thread(target=run, daemon=True).start()
 
@@ -603,6 +616,24 @@ class App(ctk.CTk):
         self.customer_label.configure(text=self._customer_summary())
         self.save_status.configure(text="✅ Datos guardados.", text_color="lightgreen")
 
+    def _toggle_loc_dropdown(self):
+        if self._loc_dropdown_open:
+            self._loc_dropdown_frame.pack_forget()
+            self._loc_dropdown_open = False
+        else:
+            self._loc_dropdown_frame.pack(fill="x", padx=16, pady=(0, 4),
+                                          after=self._loc_dropdown_btn)
+            self._loc_dropdown_open = True
+
+    def _update_loc_btn_text(self):
+        selected = [n for n, v in self._loc_check_vars.items() if v.get()]
+        if not selected:
+            self._loc_dropdown_btn.configure(text="Ninguna seleccionada")
+        elif len(selected) == 1:
+            self._loc_dropdown_btn.configure(text=selected[0])
+        else:
+            self._loc_dropdown_btn.configure(text=f"{len(selected)} agencias seleccionadas")
+
     def _start(self):
         if self.autobook_var.get() and not self._customer_ready():
             self._set_results("❌ Completá tus datos en la pestaña «Mis datos» antes de activar el auto-agendado.")
@@ -616,18 +647,16 @@ class App(ctk.CTk):
             self._set_results("❌ Fechas inválidas. Formato: YYYY-MM-DD")
             return
 
-        loc_name = self.loc_var.get()
-        loc_id   = self._locations.get(loc_name)
-        if not loc_id:
-            self._set_results("❌ Agencia no válida.")
+        selected_locs = [(self._locations[n], n) for n, v in self._loc_check_vars.items() if v.get()]
+        if not selected_locs:
+            self._set_results("❌ Seleccioná al menos una agencia.")
             return
 
         monitor.configure(
-            location_id       = loc_id,
-            location_name     = loc_name,
+            locations         = selected_locs,
             start_date        = start_dt.replace(tzinfo=timezone.utc),
             end_date          = end_dt.replace(tzinfo=timezone.utc),
-            interval_min      = int(self.interval_var.get()),
+            interval_min      = int(self.mod_interval_var.get()),
             sound_enabled     = self.sound_var.get(),
             sound_times       = 1,
             auto_book_enabled = self.autobook_var.get(),
@@ -637,13 +666,13 @@ class App(ctk.CTk):
         monitor.start()
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
-        self.loc_menu.configure(state="disabled")
+        self._loc_dropdown_btn.configure(state="disabled")
 
     def _stop(self):
         monitor.stop()
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
-        self.loc_menu.configure(state="normal")
+        self._loc_dropdown_btn.configure(state="normal")
         self.status_label.configure(text="Monitor detenido.", text_color="gray")
 
     def _test_booking(self):
@@ -736,12 +765,14 @@ class App(ctk.CTk):
             if monitor.booking_result:
                 r    = monitor.booking_result
                 rego = self._customer.get("vehicle_rego", "—")
+                loc  = next((n for _, n in monitor.locations if _ == r.get("slot", {}).get("locationId", "")),
+                            monitor.location_name)
                 texto = (
                     f"✅ ¡CITA AGENDADA!\n"
                     f"{'─'*40}\n"
                     f"Número:  {r['reservationNumber']}\n"
                     f"Fecha:   {format_date(r['slot']['time'])}\n"
-                    f"Agencia: {monitor.location_name}\n"
+                    f"Agencia: {loc}\n"
                     f"Placa:   {rego}\n"
                     f"ID:      {r['bookingId']}\n"
                     f"{'─'*40}\n"
@@ -750,75 +781,25 @@ class App(ctk.CTk):
                 self._set_results(texto)
                 self._stop()
             elif monitor.available_days:
-                self.pick_btn.configure(state="normal")
                 lines = []
                 if monitor.new_days:
                     lines.append("🆕 NUEVAS APERTURAS:")
-                    for d in monitor.new_days:
-                        lines.append(f"  ★ {format_date(d)}")
+                    for loc_name, days in monitor.new_days.items():
+                        for d in days:
+                            lines.append(f"  ★ {loc_name} · {format_date(d)}")
                     lines.append("")
-                lines.append(f"📅 {len(monitor.available_days)} día(s) disponibles en {monitor.location_name}:")
-                for d in monitor.available_days:
-                    lines.append(f"  · {format_date(d)}")
+                total = sum(len(v) for v in monitor.available_days.values())
+                lines.append(f"📅 {total} día(s) disponibles:")
+                for loc_name, days in monitor.available_days.items():
+                    lines.append(f"  🏢 {loc_name}")
+                    for d in days:
+                        lines.append(f"    · {format_date(d)}")
                 self._set_results("\n".join(lines))
             elif monitor.last_check:
-                self.pick_btn.configure(state="disabled")
                 self._set_results(f"Sin disponibilidad para el rango seleccionado.\nÚltima revisión: {monitor.last_check.strftime('%d/%m/%Y %H:%M:%S')}")
 
         self.after(10000, self._refresh)
 
-    def _open_slot_picker(self):
-        if not monitor.available_days:
-            return
-
-        def run():
-            existing = fetch_booking(
-                self._customer.get("vehicle_rego", ""),
-                self._customer.get("email", ""),
-                self._customer.get("phone", ""),
-            )
-            self.after(0, lambda: self._on_picker_check(existing))
-
-        self.pick_btn.configure(state="disabled", text="Verificando...")
-        Thread(target=run, daemon=True).start()
-
-    def _on_picker_check(self, existing: dict | None):
-        self.pick_btn.configure(state="normal", text="Elegir horario →")
-        if existing:
-            self._set_results(
-                f"⚠️ Ya tenés una cita agendada:\n"
-                f"{'─'*35}\n"
-                f"📅 {format_date(existing['startDateTime'])}\n"
-                f"🏢 {existing.get('locationName', '—')}\n"
-                f"🚗 Placa {existing.get('vehicleRego', '—')}\n"
-                f"{'─'*35}\n"
-                f"Usá la pestaña «Modificar cita» para cambiarla."
-            )
-            self._tabs.set("Modificar cita")
-            return
-        hr = self._hour_range(self.time_enabled, self.time_from, self.time_to)
-        SlotPickerWindow(self, monitor.location_id, monitor.location_name,
-                         monitor.available_days, self._customer, hr,
-                         on_booked=self._on_slot_booked)
-
-    def _on_slot_booked(self, result: dict, selected: dict):
-        self._stop()
-        self.pick_btn.configure(state="disabled")
-        items = result.get("bookingResultItems", [])
-        num   = items[0].get("reservationNumber", "?") if items else "?"
-        bid   = items[0].get("bookingId", "?") if items else "?"
-        rego  = self._customer.get("vehicle_rego", "—")
-        self._set_results(
-            f"✅ ¡CITA AGENDADA!\n"
-            f"{'─'*40}\n"
-            f"Número:  {num}\n"
-            f"Fecha:   {format_date(selected['time'])}\n"
-            f"Agencia: {monitor.location_name}\n"
-            f"Placa:   {rego}\n"
-            f"ID:      {bid}\n"
-            f"{'─'*40}\n"
-            f"Revisá tu correo para la confirmación."
-        )
 
     def _set_results(self, text: str):
         self.results_box.configure(state="normal")
@@ -855,126 +836,6 @@ class DatePicker(ctk.CTkFrame):
             return date.today().strftime("%Y-%m-%d")
 
 
-class SlotPickerWindow(ctk.CTkToplevel):
-    def __init__(self, parent, location_id, location_name, available_days, customer, hour_range, on_booked=None):
-        super().__init__(parent)
-        self.title("Elegir horario")
-        self.geometry("520x560")
-        self.resizable(False, False)
-        self.grab_set()
-
-        self._location_id   = location_id
-        self._location_name = location_name
-        self._days          = available_days
-        self._customer      = customer
-        self._hour_range    = hour_range
-        self._on_booked     = on_booked
-        self._selected_day  = None
-
-        ctk.CTkLabel(self, text=f"📅 {location_name}",
-                     font=ctk.CTkFont(size=16, weight="bold")).pack(padx=20, pady=(16, 4))
-        ctk.CTkLabel(self, text="Elegí el día y después el horario.", text_color="gray").pack()
-
-        # ── Días ──
-        ctk.CTkLabel(self, text="Días disponibles", anchor="w").pack(fill="x", padx=20, pady=(12, 4))
-        day_scroll = ctk.CTkScrollableFrame(self, height=140)
-        day_scroll.pack(fill="x", padx=20)
-        self._day_btns = []
-        for d in available_days:
-            btn = ctk.CTkButton(day_scroll, text=format_date(d), anchor="w",
-                                fg_color="transparent", hover_color="#1e3a5f",
-                                command=lambda day=d: self._load_slots(day))
-            btn.pack(fill="x", pady=2)
-            self._day_btns.append((d, btn))
-
-        # ── Slots ──
-        ctk.CTkLabel(self, text="Horarios disponibles", anchor="w").pack(fill="x", padx=20, pady=(12, 4))
-        self._slot_scroll = ctk.CTkScrollableFrame(self, height=180)
-        self._slot_scroll.pack(fill="x", padx=20)
-        self._slot_label = ctk.CTkLabel(self._slot_scroll, text="Seleccioná un día para ver los horarios.",
-                                        text_color="gray")
-        self._slot_label.pack()
-
-        self._status = ctk.CTkLabel(self, text="", text_color="lightgreen")
-        self._status.pack(pady=8)
-
-    def _load_slots(self, day: str):
-        for d, btn in self._day_btns:
-            btn.configure(fg_color="#1a6aa0" if d == day else "transparent")
-        self._selected_day = day
-
-        for w in self._slot_scroll.winfo_children():
-            w.destroy()
-        ctk.CTkLabel(self._slot_scroll, text="Cargando horarios...", text_color="gray").pack()
-
-        def run():
-            from api import fetch_time_slots
-            slots = fetch_time_slots(self._location_id, day)
-            if self._hour_range:
-                h_from, h_to = self._hour_range
-                slots = [s for s in slots if h_from <=
-                         datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR).hour <= h_to]
-            self.after(0, lambda: self._show_slots(day, slots))
-
-        Thread(target=run, daemon=True).start()
-
-    def _show_slots(self, day: str, slots: list[dict]):
-        for w in self._slot_scroll.winfo_children():
-            w.destroy()
-        if not slots:
-            ctk.CTkLabel(self._slot_scroll, text="Sin horarios disponibles para este día.", text_color="gray").pack()
-            return
-        row = None
-        for i, s in enumerate(slots):
-            if i % 4 == 0:
-                row = ctk.CTkFrame(self._slot_scroll, fg_color="transparent")
-                row.pack(fill="x", pady=2)
-            dt    = datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR)
-            label = dt.strftime("%H:%M")
-            ctk.CTkButton(row, text=label, width=100,
-                          command=lambda slot=s: self._book(day, slot)).pack(side="left", padx=4)
-
-    def _set_slots_state(self, state: str):
-        for row in self._slot_scroll.winfo_children():
-            for btn in row.winfo_children():
-                try:
-                    btn.configure(state=state)
-                except Exception:
-                    pass
-
-    def _book(self, day: str, slot: dict):
-        self._status.configure(text="⏳ Agendando...", text_color="gray")
-        self._set_slots_state("disabled")
-
-        def run():
-            from api import fetch_time_slots, confirm_timeslot, create_booking
-            all_slots = fetch_time_slots(self._location_id, day, selected_slot=slot)
-            selected  = next((s for s in all_slots if s.get("isFirstSelected")), slot)
-            confirm_timeslot(self._location_id, selected)
-            result = create_booking(self._location_id, selected, all_slots, self._customer)
-            self.after(0, lambda: self._on_result(result, selected))
-
-        Thread(target=run, daemon=True).start()
-
-    def _on_result(self, result: dict | None, selected: dict):
-        if result and result.get("isSuccess"):
-            items = result.get("bookingResultItems", [])
-            num   = items[0].get("reservationNumber", "?") if items else "?"
-            self._status.configure(
-                text=f"✅ ¡Reservado! Número: {num}  ·  {format_date(selected['time'])}",
-                text_color="lightgreen"
-            )
-            import monitor as _mon
-            _mon.trigger_booked_alert(self._location_name, selected["time"], num, 1)
-            if self._on_booked:
-                self.after(1500, lambda: (self._on_booked(result, selected), self.destroy()))
-        else:
-            msg = result.get("message", "") if result else ""
-            if "existed booking" in msg:
-                self._status.configure(text="❌ Ya tenés una cita agendada para esta placa.", text_color="red")
-            else:
-                self._status.configure(text="❌ No se pudo agendar. Intentá con otro horario.", text_color="red")
-            self._set_slots_state("normal")
 
 
 if __name__ == "__main__":

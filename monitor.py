@@ -113,13 +113,12 @@ class Monitor:
         self.running          = False
         self.last_check       = None
         self.connection_error = False
-        self.available_days: list[str] = []
-        self.new_days:       list[str] = []
-        self._previous_days: set[str]  = set()
+        self.available_days: dict[str, list[str]] = {}   # {loc_name: [days]}
+        self.new_days:       dict[str, list[str]] = {}
+        self._previous_days: dict[str, set[str]]  = {}
         self.booking_result: dict | None = None
 
-        self.location_id    = ""
-        self.location_name  = ""
+        self.locations:  list[tuple[str, str]] = []      # [(loc_id, loc_name), ...]
         self.start_date     = datetime.now(timezone.utc)
         self.end_date       = datetime.now(timezone.utc) + timedelta(days=30)
         self.interval_min   = 5
@@ -129,13 +128,16 @@ class Monitor:
         self.customer: dict    = {}
         self.hour_range: tuple[int, int] | None = None
 
-    def configure(self, location_id: str, location_name: str,
+    @property
+    def location_name(self) -> str:
+        return ", ".join(name for _, name in self.locations)
+
+    def configure(self, locations: list[tuple[str, str]],
                   start_date: datetime, end_date: datetime,
                   interval_min: int, sound_enabled: bool, sound_times: int,
                   auto_book_enabled: bool, customer: dict,
                   hour_range: tuple[int, int] | None = None):
-        self.location_id       = location_id
-        self.location_name     = location_name
+        self.locations         = locations
         self.start_date        = start_date
         self.end_date          = end_date
         self.interval_min      = interval_min
@@ -149,7 +151,7 @@ class Monitor:
         if self.running:
             return
         self._stop_event.clear()
-        self._previous_days  = set()
+        self._previous_days  = {}
         self._first_check    = True
         self.booking_result  = None
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -170,28 +172,51 @@ class Monitor:
             self._stop_event.wait(timeout=self.interval_min * 60)
 
     def _check(self):
-        days = fetch_available_days(self.location_id, self.start_date, self.end_date)
         self.last_check = datetime.now(TZ_CR)
+        fetched: dict[str, tuple[str, list[str]]] = {}  # loc_name → (loc_id, days)
+        any_error = False
 
-        if days is None:
+        for loc_id, loc_name in self.locations:
+            days = fetch_available_days(loc_id, self.start_date, self.end_date)
+            if days is None:
+                any_error = True
+            else:
+                fetched[loc_name] = (loc_id, days)
+
+        if any_error and not fetched:
             self.connection_error = True
             return
 
         self.connection_error = False
-        curr = set(days)
+        new_days: dict[str, list[str]] = {}
+        available_days: dict[str, list[str]] = {}
 
-        self.new_days       = [] if self._first_check else sorted(curr - self._previous_days)
-        self._previous_days = curr
+        for loc_name, (loc_id, days) in fetched.items():
+            curr = set(days)
+            prev = self._previous_days.get(loc_name, set())
+            if not self._first_check:
+                new = sorted(curr - prev)
+                if new:
+                    new_days[loc_name] = new
+            self._previous_days[loc_name] = curr
+            if days:
+                available_days[loc_name] = sorted(days)
+
         self._first_check   = False
-        self.available_days = sorted(days)
+        self.new_days       = new_days
+        self.available_days = available_days
 
-        if days and self.sound_enabled and not self.auto_book_enabled:
-            trigger_alert(self.location_name, self.sound_times)
+        if available_days and self.sound_enabled and not self.auto_book_enabled:
+            first_loc = next(iter(available_days))
+            trigger_alert(first_loc, self.sound_times)
 
-        if days and self.auto_book_enabled and not self.booking_result:
-            result = auto_book(self.location_id, self.location_name, days, self.customer, self.sound_times, self.hour_range)
-            if result:
-                self.booking_result = result
+        if available_days and self.auto_book_enabled and not self.booking_result:
+            for loc_name, days in available_days.items():
+                loc_id = next(lid for lid, ln in self.locations if ln == loc_name)
+                result = auto_book(loc_id, loc_name, days, self.customer, self.sound_times, self.hour_range)
+                if result:
+                    self.booking_result = result
+                    break
 
 
 monitor = Monitor()
