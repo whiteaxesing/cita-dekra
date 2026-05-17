@@ -1,4 +1,4 @@
-VERSION    = "1.3.1"
+VERSION    = "1.3.2"
 REPO       = "whiteaxesing/cita-dekra"
 
 TENANT_ID  = "81795580-f3e6-4ee0-8274-38f3b42598f9"
