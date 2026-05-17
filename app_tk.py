@@ -128,12 +128,10 @@ class App(ctk.CTk):
             r = _req.get(f"https://api.github.com/repos/{REPO}/releases/latest", timeout=5)
             latest = r.json().get("tag_name", "").lstrip("v")
             if latest and latest != VERSION:
-                self.after(0, lambda: self._update_label.configure(
-                    text=f"⬆ Nueva versión disponible: v{latest} — descargá en Releases",
-                ))
-                self.after(0, lambda: self._update_label.bind(
-                    "<Button-1>", lambda e: __import__("webbrowser").open(
-                        f"https://github.com/{REPO}/releases/latest")
+                url = f"https://github.com/{REPO}/releases/latest"
+                self.after(0, lambda u=url, v=latest: self._update_label.configure(
+                    text=f"⬆ Nueva versión disponible: v{v} — descargá en Releases",
+                    command=lambda: __import__("webbrowser").open(u),
                 ))
         except Exception:
             pass
@@ -148,7 +146,8 @@ class App(ctk.CTk):
         ctk.CTkLabel(self, text="🚗 Cita DEKRA", font=ctk.CTkFont(size=22, weight="bold")).pack(padx=20, pady=(20, 4))
         ctk.CTkLabel(self, text="Monitor automático de disponibilidad", text_color="gray").pack(pady=(0, 10))
 
-        self._update_label = ctk.CTkLabel(self, text="", text_color="#f0a500", cursor="hand2")
+        self._update_label = ctk.CTkButton(self, text="", text_color="#f0a500", fg_color="transparent",
+                                           hover_color="#2a2a2a", border_width=0, cursor="hand2")
         self._update_label.pack()
 
         self._tabs = ctk.CTkTabview(self)
