@@ -7,7 +7,10 @@ from zoneinfo import ZoneInfo
 
 from api import fetch_available_days, fetch_time_slots, confirm_timeslot, create_booking
 
-TZ_CR = ZoneInfo("America/Costa_Rica")
+try:
+    TZ_CR = ZoneInfo("America/Costa_Rica")
+except Exception:
+    TZ_CR = timezone(timedelta(hours=-6))
 
 
 def _play_glass(times: int = 1):

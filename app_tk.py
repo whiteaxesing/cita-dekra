@@ -1,6 +1,7 @@
 import customtkinter as ctk
 from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
+from datetime import timezone as _tz
 from threading import Thread
 import threading
 from pathlib import Path
@@ -12,7 +13,10 @@ from api import (fetch_locations, fetch_available_days, fetch_time_slots,
 from config import PRODUCT_ID, VERSION, REPO
 from monitor import monitor, format_date, _filter_days_by_weekday
 
-TZ_CR = ZoneInfo("America/Costa_Rica")
+try:
+    TZ_CR = ZoneInfo("America/Costa_Rica")
+except Exception:
+    TZ_CR = _tz(timedelta(hours=-6))
 CUSTOMER_FILE = Path.home() / ".cita_dekra.json"
 
 ctk.set_appearance_mode("dark")
@@ -338,25 +342,28 @@ class App(ctk.CTk):
         def run():
             c = self._customer
             b = fetch_booking(c.get("vehicle_rego", ""), c.get("email", ""), c.get("phone", ""))
-            if not b:
-                self.mod_card_fecha.configure(text="📅  Sin cita activa encontrada.", text_color="gray")
-                self.mod_card_agencia.configure(text="🏢  —", text_color="gray")
-                self.mod_card_placa.configure(text="🚗  —", text_color="gray")
-                self._set_mod_status("Sin cita activa para tus datos.")
-                self._current_booking = None
-                self.cancel_btn.configure(state="disabled")
-                self.automod_start_btn.configure(state="disabled")
-                return
-
-            self._current_booking = b
-            self.mod_card_fecha.configure(text=f"📅  {format_date(b['startDateTime'])}", text_color="white")
-            self.mod_card_agencia.configure(text=f"🏢  {b.get('locationName', '—')}", text_color="#aac4e0")
-            self.mod_card_placa.configure(text=f"🚗  Placa {b.get('vehicleRego', '—')}", text_color="#aac4e0")
-            self._set_mod_status("Cita encontrada. Elegí la nueva agencia y fechas, y presioná «Modificar» o «Iniciar búsqueda».")
-            self.cancel_btn.configure(state="normal")
-            self.automod_start_btn.configure(state="normal")
+            self.after(0, lambda: self._on_buscar_result(b))
 
         Thread(target=run, daemon=True).start()
+
+    def _on_buscar_result(self, b: dict | None):
+        if not b:
+            self.mod_card_fecha.configure(text="📅  Sin cita activa encontrada.", text_color="gray")
+            self.mod_card_agencia.configure(text="🏢  —", text_color="gray")
+            self.mod_card_placa.configure(text="🚗  —", text_color="gray")
+            self._set_mod_status("Sin cita activa para tus datos.")
+            self._current_booking = None
+            self.cancel_btn.configure(state="disabled")
+            self.automod_start_btn.configure(state="disabled")
+            return
+
+        self._current_booking = b
+        self.mod_card_fecha.configure(text=f"📅  {format_date(b['startDateTime'])}", text_color="white")
+        self.mod_card_agencia.configure(text=f"🏢  {b.get('locationName', '—')}", text_color="#aac4e0")
+        self.mod_card_placa.configure(text=f"🚗  Placa {b.get('vehicleRego', '—')}", text_color="#aac4e0")
+        self._set_mod_status("Cita encontrada. Elegí la nueva agencia y fechas, y presioná «Iniciar búsqueda».")
+        self.cancel_btn.configure(state="normal")
+        self.automod_start_btn.configure(state="normal")
 
     def _start_automod(self):
         if not self._current_booking:
