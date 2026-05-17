@@ -36,9 +36,10 @@ def fetch_locations() -> list[dict]:
 
 def fetch_available_days(location_id: str, start: datetime, end: datetime) -> list[str] | None:
     """Devuelve lista de días disponibles, o None si hay error de conexión."""
+    end_eod = end.replace(hour=23, minute=59, second=59)
     params = {
         "startDate":             start.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-        "endDate":               end.strftime("%Y-%m-%dT%H:%M:%S.999Z"),
+        "endDate":               end_eod.strftime("%Y-%m-%dT%H:%M:%S.999Z"),
         "tenantId":              TENANT_ID,
         "productId":             PRODUCT_ID,
         "locationId":            location_id,
