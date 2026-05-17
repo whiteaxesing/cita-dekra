@@ -275,8 +275,10 @@ class App(ctk.CTk):
             fill="x", padx=16, pady=(6, 8))
 
         ctk.CTkLabel(ctrl, text="Nueva agencia", anchor="w").pack(fill="x", **pad)
-        self.mod_loc_var = ctk.StringVar(value=sorted(self._locations.keys())[0] if self._locations else "")
-        ctk.CTkOptionMenu(ctrl, variable=self.mod_loc_var, values=sorted(self._locations.keys())).pack(fill="x", **pad)
+        loc_names = sorted(self._locations.keys())
+        self.mod_loc_var = ctk.StringVar(value="— Elegí una agencia —")
+        ctk.CTkOptionMenu(ctrl, variable=self.mod_loc_var,
+                          values=["— Elegí una agencia —"] + loc_names).pack(fill="x", **pad)
 
         date_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
         date_frame.pack(fill="x", **pad)
@@ -367,6 +369,9 @@ class App(ctk.CTk):
 
     def _start_automod(self):
         if not self._current_booking:
+            return
+        if not self._locations.get(self.mod_loc_var.get()):
+            self._set_mod_status("❌ Elegí una agencia primero.")
             return
         try:
             start_dt = datetime.strptime(self.mod_start.get(), "%Y-%m-%d")
