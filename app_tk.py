@@ -9,8 +9,8 @@ import json
 from api import (fetch_locations, fetch_available_days, fetch_time_slots,
                  confirm_timeslot, create_booking, release_timeslot,
                  fetch_booking, check_update_allowed, delete_booking)
-from config import PRODUCT_ID
-from monitor import monitor, format_date
+from config import PRODUCT_ID, VERSION, REPO
+from monitor import monitor, format_date, _filter_days_by_weekday
 
 TZ_CR = ZoneInfo("America/Costa_Rica")
 CUSTOMER_FILE = Path.home() / ".cita_dekra.json"
@@ -49,6 +49,8 @@ class App(ctk.CTk):
         if not self._customer.get("email"):
             self._tabs.set("Mis datos")
 
+        Thread(target=self._check_update, daemon=True).start()
+
     # ─── Helpers de UI ───────────────────────────────────────────────────────
 
     def _filter_slots_by_hour(self, slots: list[dict], hour_from: int, hour_to: int) -> list[dict]:
@@ -58,6 +60,32 @@ class App(ctk.CTk):
             if hour_from <= dt.hour <= hour_to:
                 result.append(s)
         return result
+
+    def _build_day_filter(self, parent, pad) -> tuple[ctk.BooleanVar, list[ctk.BooleanVar]]:
+        """Retorna (enabled_var, [day_vars Lun..Dom])."""
+        DAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+        enabled_var = ctk.BooleanVar(value=False)
+        day_vars    = [ctk.BooleanVar(value=True) for _ in DAYS]
+
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.pack(fill="x", **pad)
+
+        day_frame = ctk.CTkFrame(container, fg_color="transparent")
+        row = ctk.CTkFrame(day_frame, fg_color="transparent")
+        row.pack(fill="x")
+        for name, var in zip(DAYS, day_vars):
+            ctk.CTkCheckBox(row, text=name, variable=var, width=68).pack(side="left", padx=2)
+
+        ctk.CTkSwitch(container, text="📆 Filtrar por día", variable=enabled_var,
+                      command=lambda: day_frame.pack(fill="x", pady=(4, 0)) if enabled_var.get()
+                                      else day_frame.pack_forget()).pack(fill="x")
+        return enabled_var, day_vars
+
+    def _day_filter(self, enabled_var: ctk.BooleanVar, day_vars: list[ctk.BooleanVar]) -> set[int] | None:
+        if not enabled_var.get():
+            return None
+        result = {i for i, v in enumerate(day_vars) if v.get()}
+        return result if result else None
 
     def _build_time_filter(self, parent, pad) -> tuple[ctk.BooleanVar, ctk.StringVar, ctk.StringVar]:
         """Retorna (enabled_var, from_var, to_var). El frame de horas se muestra/oculta dentro de un contenedor fijo."""
@@ -90,6 +118,22 @@ class App(ctk.CTk):
 
     # ─── Cargar agencias ──────────────────────────────────────────────────────
 
+    def _check_update(self):
+        try:
+            import requests as _req
+            r = _req.get(f"https://api.github.com/repos/{REPO}/releases/latest", timeout=5)
+            latest = r.json().get("tag_name", "").lstrip("v")
+            if latest and latest != VERSION:
+                self.after(0, lambda: self._update_label.configure(
+                    text=f"⬆ Nueva versión disponible: v{latest} — descargá en Releases",
+                ))
+                self.after(0, lambda: self._update_label.bind(
+                    "<Button-1>", lambda e: __import__("webbrowser").open(
+                        f"https://github.com/{REPO}/releases/latest")
+                ))
+        except Exception:
+            pass
+
     def _load_locations(self):
         locs = fetch_locations()
         self._locations = {loc["locationName"].strip(): loc["locationId"] for loc in locs}
@@ -99,6 +143,9 @@ class App(ctk.CTk):
     def _build_ui(self):
         ctk.CTkLabel(self, text="🚗 Cita DEKRA", font=ctk.CTkFont(size=22, weight="bold")).pack(padx=20, pady=(20, 4))
         ctk.CTkLabel(self, text="Monitor automático de disponibilidad", text_color="gray").pack(pady=(0, 10))
+
+        self._update_label = ctk.CTkLabel(self, text="", text_color="#f0a500", cursor="hand2")
+        self._update_label.pack()
 
         self._tabs = ctk.CTkTabview(self)
         self._tabs.pack(fill="both", expand=True, padx=20, pady=(0, 16))
@@ -161,8 +208,9 @@ class App(ctk.CTk):
         self.end_entry = self._date_picker(right, date.today() + timedelta(days=30))
         self.end_entry.pack(fill="x")
 
-        # ── Filtro de horario ──
+        # ── Filtros ──
         self.time_enabled, self.time_from, self.time_to = self._build_time_filter(ctrl, pad)
+        self.day_enabled, self.day_vars = self._build_day_filter(ctrl, pad)
 
         # ── Intervalo ──
         ctk.CTkLabel(ctrl, text="Revisar cada (minutos)", anchor="w").pack(fill="x", **pad)
@@ -240,6 +288,7 @@ class App(ctk.CTk):
         self.mod_end.pack(fill="x")
 
         self.mod_time_enabled, self.mod_time_from, self.mod_time_to = self._build_time_filter(ctrl, pad)
+        self.mod_day_enabled, self.mod_day_vars = self._build_day_filter(ctrl, pad)
 
         # ── Intervalo ──
         ctk.CTkLabel(ctrl, text="Revisar cada (minutos)", anchor="w").pack(fill="x", **pad)
@@ -339,7 +388,8 @@ class App(ctk.CTk):
         interval = int(self.mod_interval_var.get()) * 60
         new_loc_name = self.mod_loc_var.get()
         new_loc_id   = self._locations.get(new_loc_name, "")
-        hr = self._hour_range(self.mod_time_enabled, self.mod_time_from, self.mod_time_to)
+        hr  = self._hour_range(self.mod_time_enabled, self.mod_time_from, self.mod_time_to)
+        df  = self._day_filter(self.mod_day_enabled, self.mod_day_vars)
 
         while not self._automod_stop.is_set():
             self.after(0, lambda: self._set_mod_status(
@@ -356,7 +406,7 @@ class App(ctk.CTk):
                 self._automod_stop.wait(timeout=int(self.mod_interval_var.get()) * 60)
                 continue
             if days:
-                for day in days:
+                for day in _filter_days_by_weekday(days, df):
                     if self._automod_stop.is_set():
                         return
                     slots = fetch_time_slots(new_loc_id, day)
@@ -663,6 +713,7 @@ class App(ctk.CTk):
             auto_book_enabled = self.autobook_var.get(),
             customer          = self._customer,
             hour_range        = self._hour_range(self.time_enabled, self.time_from, self.time_to),
+            day_filter        = self._day_filter(self.day_enabled, self.day_vars),
         )
         monitor.start()
         self.start_btn.configure(state="disabled")

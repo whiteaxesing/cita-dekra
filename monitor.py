@@ -69,19 +69,23 @@ def _filter_by_hour(slots: list[dict], hour_range: tuple[int, int] | None) -> li
     if not hour_range:
         return slots
     h_from, h_to = hour_range
-    result = []
-    for s in slots:
-        dt = datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR)
-        if h_from <= dt.hour <= h_to:
-            result.append(s)
-    return result
+    return [s for s in slots
+            if h_from <= datetime.fromisoformat(s["time"].replace("Z", "+00:00")).astimezone(TZ_CR).hour <= h_to]
+
+
+def _filter_days_by_weekday(days: list[str], day_filter: set[int] | None) -> list[str]:
+    if not day_filter:
+        return days
+    return [d for d in days
+            if datetime.fromisoformat(d.replace("Z", "+00:00")).astimezone(TZ_CR).weekday() in day_filter]
 
 
 def auto_book(location_id: str, location_name: str, available_days: list[str],
               customer: dict, sound_times: int,
-              hour_range: tuple[int, int] | None = None) -> dict | None:
+              hour_range: tuple[int, int] | None = None,
+              day_filter: set[int] | None = None) -> dict | None:
     """Toma el primer día disponible, agarra el primer slot y reserva. Devuelve resultado o None."""
-    for day in available_days:
+    for day in _filter_days_by_weekday(available_days, day_filter):
         slots = _filter_by_hour(fetch_time_slots(location_id, day), hour_range)
         if not slots:
             continue
@@ -127,6 +131,7 @@ class Monitor:
         self.auto_book_enabled = False
         self.customer: dict    = {}
         self.hour_range: tuple[int, int] | None = None
+        self.day_filter: set[int] | None = None
 
     @property
     def location_name(self) -> str:
@@ -136,7 +141,8 @@ class Monitor:
                   start_date: datetime, end_date: datetime,
                   interval_min: int, sound_enabled: bool, sound_times: int,
                   auto_book_enabled: bool, customer: dict,
-                  hour_range: tuple[int, int] | None = None):
+                  hour_range: tuple[int, int] | None = None,
+                  day_filter: set[int] | None = None):
         self.locations         = locations
         self.start_date        = start_date
         self.end_date          = end_date
@@ -146,6 +152,7 @@ class Monitor:
         self.auto_book_enabled = auto_book_enabled
         self.customer          = customer
         self.hour_range        = hour_range
+        self.day_filter        = day_filter
 
     def start(self):
         if self.running:
@@ -192,6 +199,7 @@ class Monitor:
         available_days: dict[str, list[str]] = {}
 
         for loc_name, (loc_id, days) in fetched.items():
+            days = _filter_days_by_weekday(days, self.day_filter)
             curr = set(days)
             prev = self._previous_days.get(loc_name, set())
             if not self._first_check:
@@ -213,7 +221,7 @@ class Monitor:
         if available_days and self.auto_book_enabled and not self.booking_result:
             for loc_name, days in available_days.items():
                 loc_id = next(lid for lid, ln in self.locations if ln == loc_name)
-                result = auto_book(loc_id, loc_name, days, self.customer, self.sound_times, self.hour_range)
+                result = auto_book(loc_id, loc_name, days, self.customer, self.sound_times, self.hour_range, self.day_filter)
                 if result:
                     self.booking_result = result
                     break
